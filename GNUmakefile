@@ -97,3 +97,10 @@ login:
   Error: machine is not running\n";						\
 	    fi;									\
 	fi;
+
+
+rm-dockers:
+	docker rm $$(docker ps -aq)
+
+dockerip-%:
+	@docker inspect --format '{{ .NetworkSettings.IPAddress }}' $*

@@ -20,15 +20,14 @@ config.sqlite:		mongrel2.conf
 	docker run -p 80:80 -v $$(pwd):/host webheroes/mongrel2 bash -c "cd host; m2sh load -db config.sqlite --config mongrel2.conf"
 
 start-%:		config.sqlite
-	docker run -d -p 80:80 -v $$(pwd):/host webheroes/mongrel2 bash -c "cd host; ./start.sh $*" > var/run/docker.pid
+	docker run -d --name mg2 -p 80:80 -v $$(pwd):/host webheroes/mongrel2 bash -c "cd host; ./start.sh $*" > var/run/docker.pid
 
 var/run/mongrel2.pid:
-	@printf "Mongrel2 server is not running"
+	@printf "[ error ] Mongrel2 server is not running\n\n" && exit 1
 var/run/docker.pid:
-	@printf "Docker is not running"
+	@printf "[ error ] Docker is not running\n\n" && exit 1
 
 stop-%:			var/run/docker.pid		\
 			var/run/mongrel2.pid
-	docker exec $$(cat $<) bash -c "cd host; m2sh stop -name $*"		\
-	&& docker rm $$(cat $<)							\
+	@docker exec $$(cat $<) bash -c "cd host; m2sh stop -name $*"		\
 	&& rm $<
