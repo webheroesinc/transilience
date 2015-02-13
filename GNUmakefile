@@ -98,9 +98,26 @@ login:
 	    fi;									\
 	fi;
 
+list-files:
+	find . -type d \( -path ./.vagrant -o -path ./.git \) -prune -o -print
 
-rm-dockers:
+list-dirty-files:
+	@find . -type d \( -path ./.vagrant -o -path ./.git \) -prune -o \( -name '*~' -o -name '*.log' -o -name '*.pid' \) -print
+
+/usr/bin/docker-ip:		usr/bin/docker-ip
+	sudo rsync -va --chmod="0755" usr/bin/docker-ip $@
+
+load-scripts:		/usr/bin/docker-ip
+
+start:
+	make -C ./mongrel2 start-main
+	make -C ./handlers start-api
+
+stop-containers:
+	make -C ./mongrel2 stop-main
+	make -C ./handlers stop-api
+
+remove-containers:
 	docker rm $$(docker ps -aq)
 
-dockerip-%:
-	@docker inspect --format '{{ .NetworkSettings.IPAddress }}' $*
+stop:		stop-containers remove-containers
