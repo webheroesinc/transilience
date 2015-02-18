@@ -83,8 +83,11 @@ login:
 	if ip=$$( config=$$(vagrant ssh-config 2> /dev/null | grep HostName)	\
 		&& ip=$${config##*HostName }					\
 		&& echo $$ip ); then						\
-	    printf "\n  ssh -tC $(USERNAME)@$$ip\n";				\
-	    ssh -tC $(USERNAME)@$$ip;						\
+	    port=$$( config=$$(vagrant ssh-config 2> /dev/null | grep Port)	\
+		&& port=$${config##*Port }					\
+		&& echo $$port );						\
+	    printf "\n  ssh -p $$port -tC $(USERNAME)@$$ip\n";			\
+	    ssh -p $$port -tC $(USERNAME)@$$ip;					\
 	else									\
 	    printf "[ failed ]\n\
   Could not determine vagrant ip\n\
