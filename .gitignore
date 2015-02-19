@@ -2,3 +2,7 @@
 *.log
 *.log.*
 *.pid
+*.ip
+*~
+*.pyc
+/mongrel2/*.sqlite

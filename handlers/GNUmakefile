@@ -14,17 +14,18 @@ all:
 FORCE:
 
 log-rotate:
-	mv api_docker.log api_docker.log.1
-	mv api_handler.log api_handler.log.1
+	mv ../var/log/api_docker.log ../var/log/api_docker.log.1	|| true
 
 start-api:		log-rotate
-	docker run -d --name api --link mg2:web -v $$(pwd):/host -w /host webheroes/mongrel2 python api_handler.py > api_handler.pid
-	nohup docker logs -f $$(cat api_handler.pid) > api_docker.log 2>&1 &
-	@echo "Logging docker logs to api_docker.log"
+	docker rm api 2> /dev/null			|| true
+	rm ../var/run/api_handler.pid 2> /dev/null	|| true
+	docker run -d --name api -v $$(pwd)/..:/host -w /host/handlers webheroes/mongrel2 python api_handler.py > ../var/run/api_handler.pid
+	nohup docker logs -f $$(cat ../var/run/api_handler.pid) > ../var/log/api_docker.log 2>&1 &
+	@echo "Logging docker logs to ../var/log/api_docker.log"
 
-%.pid:
+../var/run/%.pid:
 	@printf "[ error ] Docker '$*' is not running\n\n" && exit 1
 
-stop-api:	api_handler.pid
+stop-api:	../var/run/api_handler.pid
 	docker kill --signal="TERM" $$(cat $<)	\
 	&& rm $<

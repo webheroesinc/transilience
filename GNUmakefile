@@ -23,6 +23,11 @@ all:
 	@echo "				     o Upgrade linux headers"
 	@echo "				     o Add created user to docker group"
 	@echo ""
+	@echo "	 list-files		-- find all files that are not .vagrant or .git files"
+	@echo "	 list-dirty-files	-- from list-files result, find files with dirty extensions (*~, *.pid, *.log)"
+	@echo "	 load-scripts		-- Add project helper scripts to /usr/bin"
+	@echo "	 remove-containers	-- Get all container IDs and docker rm them"
+	@echo ""
 
 FORCE:
 
