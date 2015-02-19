@@ -12,33 +12,46 @@ all:
 
 FORCE:
 
+mg2_s		= ../var/run/mongrel2_server.pid
+mg2_d		= ../var/run/mg2.pid
+mg2_ip		= ../var/addr/mg2.ip
+
 mongrel2.conf:
 	@printf "Create and configure a mongrel2.conf\n\
   (example: https://github.com/zedshaw/mongrel2/blob/master/examples/configs/multi_handler.conf)\n" && exit 1
 
 config.sqlite:		mongrel2.conf
-	docker run --name mg2_conf -p 80:80 -v $$(pwd):/mg2 -w /mg2 webheroes/mongrel2 m2sh load -db config.sqlite --config mongrel2.conf
+	docker run --name mg2_conf -p 80:80		\
+		-v $$(pwd):/mg2				\
+		-w /mg2					\
+		webheroes/mongrel2			\
+		m2sh load -db config.sqlite --config mongrel2.conf
 	docker rm mg2_conf
 
 start-%:		config.sqlite
-	docker rm mg2 2> /dev/null				|| true
-	rm -f ../var/run/mongrel2_server.pid 2> /dev/null	|| true
-	docker run -d --name mg2 -p 80:80 -v $$(pwd)/..:/host -v $$(pwd):/mg2 -w /mg2 webheroes/mongrel2 ./start.sh $* > ../var/run/mg2.pid
-	docker inspect --format '{{ .NetworkSettings.IPAddress }}' mg2 > ../var/addr/mg2.ip
+	docker rm mg2	2> /dev/null	|| true
+	rm -f $(mg2_s)	2> /dev/null	|| true
+	docker run -d --name mg2 -p 80:80		\
+		-v $$(pwd)/..:/host			\
+		-v $$(pwd):/mg2				\
+		-w /mg2					\
+		webheroes/mongrel2			\
+		./start.sh $*		> $(mg2_d)
+	docker inspect --format '{{ .NetworkSettings.IPAddress }}' mg2 > $(mg2_ip)
 
-../var/run/mongrel2_server.pid:
+$(mg2):
 	@printf "[ error ] Mongrel2 server is not running\n\n" && exit 1
-../var/run/mg2.pid:
+$(mg2_d):
 	@printf "[ error ] Docker is not running\n\n" && exit 1
-../var/addr/mg2.ip:
+$(mg2_ip):
 	@printf "[ error ] Docker IP file does not exist\n\n" && exit 1
 
-stop-%:			../var/run/mg2.pid		\
-			../var/addr/mg2.ip		\
-			../var/run/mongrel2_server.pid
-	docker exec $$(cat $<) m2sh stop -name $*	\
-	&& rm $<					\
-	&& rm ../var/addr/mg2.ip
+stop-%:			$(mg2_d)			\
+			$(mg2_ip)			\
+			$(mg2_s)
+	docker exec $$(cat $(mg2_d)) m2sh stop -name $*	\
+	&& rm $(mg2_d)					\
+	&& rm $(mg2_ip)
 
 join:
 	docker exec -it mg2 bash

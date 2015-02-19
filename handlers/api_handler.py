@@ -12,7 +12,7 @@ def setup_logging():
     logging.basicConfig(
         filename	= '{0}.log'.format(scriptname),
         level		= logging.DEBUG,
-        datefmt		= '%y-%m-%d %H:%M:%S',
+        datefmt		= '%Y-%m-%d %H:%M:%S',
         format		= '%(asctime)s.%(msecs).03d %(threadName)10.10s %(name)-15.15s %(funcName)-15.15s %(levelname)-8.8s %(message)s',
     )
 
