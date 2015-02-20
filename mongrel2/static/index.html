@@ -5,5 +5,22 @@
     </head>
     <body>
         <h1>The great and powerful Transilience!</h1>
+
+	<script type="text/javascript">
+	    (function(window) {
+	        var host	= window.location.host;
+	        var uri		= 'ws://'+host+'/api'
+		window.ws	= new WebSocket(uri);
+		ws.onmessage	= function(m) {
+		    console.log(m.data);
+		}
+		ws.onopen	= function() {
+		    console.log("WebSocket connection successfully opened");
+		}
+		ws.onclose	= function() {
+		    console.log("WebSocket closed");
+		}
+	    })(window);
+	</script>
     </body>
 </html>
