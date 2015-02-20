@@ -17,7 +17,7 @@ def setup_logging():
     )
 
     
-def main(**args):    
+def main(**args):
     logging.debug("Getting mg2 address")
     web_addr		= None
     with open("../var/addr/mg2.ip", 'r') as f:
@@ -26,7 +26,7 @@ def main(**args):
         logging.error("[ exiting ] Could not determine Mongrel2 server IP, ../var/addr/mg2.ip not found")
         sys.exit()
     logging.warn("Using address %s for mg2 connection", web_addr)
-    
+
     logging.debug("Setting up connection object on pull:tcp://{0}:9999 and pub:tcp://{0}:9998".format(web_addr))
     conn		= Connection( sender_id=str(uuid.uuid1()),
                                   sub_addr="tcp://{0}:9999".format(web_addr),
@@ -43,9 +43,12 @@ def main(**args):
             if conn.reqs in socks and socks[conn.reqs] == zmq.POLLIN:
                 req	= conn.recv()
                 headers	= req.headers
+                if headers.get('METHOD').lower() == "json":
+                    continue
+                
                 logging.debug("Request headers: %s", headers)
                 conn.reply_http(req, "I'm so happy that this worked!")
-                logging.info("Sent reply to %s", headers['REMOTE_ADDR'])
+                logging.info("Sent reply to %s", headers.get('REMOTE_ADDR'))
         except Exception, e:
             logging.error("[ error ] Infinite loop broke with error: %s", e)
     
