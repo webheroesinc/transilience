@@ -102,10 +102,16 @@ def main(**args):
                                    "Connection: Upgrade",
                                    "Sec-WebSocket-Accept: %s\r\n\r\n"]) % req.body)
                 elif method in ['get','post','put','delete']:
-                    conn.reply_http(req, "I'm so happy that this worked!")
+                    conn.reply_http(req, "b5b44d95-2e33-4af9-95fe-1cade9cd86ef")
                     logging.info("Sent reply to %s", headers.get('REMOTE_ADDR'))
                 else:
                     logging.debug("Unrecognized method: %s\n%s", method, req.body)
+        except zmq.ZMQError:
+            if str(e) == "Interrupted system call":
+                pass
+            else:
+                logging.error("[ error ] Infinite loop broke with error: %s", e)
+                logging.debug("[ stacktrace ] %s", traceback.format_exc())
         except Exception, e:
             logging.error("[ error ] Infinite loop broke with error: %s", e)
             logging.debug("[ stacktrace ] %s", traceback.format_exc())

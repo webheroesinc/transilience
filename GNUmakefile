@@ -129,3 +129,6 @@ remove-containers:
 	docker rm $$(docker ps -aq)
 
 stop:		stop-containers remove-containers
+
+interactive:
+	docker run -it -v $$(pwd):/host -w /host webheroes/handler bash
