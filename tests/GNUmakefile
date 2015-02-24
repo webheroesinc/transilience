@@ -5,8 +5,8 @@ all:
 	@echo ""
 	@echo "Running tests:"
 	@echo ""
-	@echo "	 run-main		-- Run py.test for matching glob (test_*.py)"
-	@echo "	 run-slow-subscriber	-- Test that we can force slow subscriber to occur and then fix it"
+	@echo "	 test-main		-- Run py.test for matching glob (test_*.py)"
+	@echo "	 test-slow-subscriber	-- Test that we can force slow subscriber to occur and then fix it"
 	@echo ""
 
 FORCE:

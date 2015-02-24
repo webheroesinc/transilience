@@ -118,12 +118,12 @@ list-dirty-files:
 load-scripts:		/usr/bin/docker-ip
 
 start:
-	make -C ./mongrel2 start-main
-	make -C ./handlers start-api
+	make -C ./mongrel2 start-main	|| true
+	make -C ./handlers start-api	|| true
 
 stop-containers:
-	make -C ./mongrel2 stop-main
-	make -C ./handlers stop-api
+	make -C ./mongrel2 stop-main	|| true
+	make -C ./handlers stop-api	|| true
 
 remove-containers:
 	docker rm $$(docker ps -aq)
