@@ -17,7 +17,7 @@ start-api:
 	docker run -d --name api			\
 		-v $$(pwd)/..:/host			\
 		-w /host/handlers			\
-		webheroes/mongrel2			\
+		webheroes/handler			\
 		python api_handler.py	> $(api_dpid)
 	docker inspect --format '{{ .NetworkSettings.IPAddress }}' api > $(api_ip)
 	nohup docker logs -f api	> $(api_dlog) 2>&1 &

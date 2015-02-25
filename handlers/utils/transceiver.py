@@ -33,9 +33,12 @@ Usage:
 """
 
 from mongrel2.handler	import Connection
+from mongrel2.request	import Request
+from .			import discovery
+
 import os, sys, signal, time
 import uuid, logging, traceback
-import zmq
+import zmq, uuid
 import urlparse, re
 
 timer			= time.time
@@ -200,6 +203,7 @@ class Transceiver(object):
                         logging.info("Sent pong to %s", headers.get('REMOTE_ADDR'))
                         continue
                     else:
+                        req.headers['QUERY_STR']= req.headers['QUERY']
                         req.headers['QUERY']	= query
                         yield (sid,req)
                 else:
@@ -237,3 +241,150 @@ class Transceiver(object):
             "Upgrade: websocket",
             "Connection: Upgrade",
             "Sec-WebSocket-Accept: %s\r\n\r\n"]) % req.body)
+
+
+class Server(object):
+    CONN_COUNT		= 0 
+
+    def __init__(self, sender=None):
+        Server.CONN_COUNT      += 1
+        self.conn_id		= str(Server.CONN_COUNT)
+        self._with		= False
+
+        if not hasattr(Server, 'sender'):
+            Server.sender	= str(uuid.uuid4()) if sender is None else sender
+
+        if not hasattr(Server, 'sip'):
+            self.sip		= discovery.get_docker_ip()
+            self.push_addr	= (self.sip, Transceiver.PUSH_PORT)
+            self.sub_addr	= (self.sip, Transceiver.SUB_PORT)
+        
+        if not hasattr(Server, 'CTX'):
+            Server.CTX		= zmq.Context()
+
+        if not hasattr(Server, 'push'):
+            Server.push		= self.CTX.socket(zmq.PUSH)
+            self.push.bind('tcp://*:{0}'.format(Transceiver.PUSH_PORT))
+            
+            Server.push_poller	= zmq.Poller()
+            self.push_poller.register(self.push, zmq.POLLOUT)
+            
+        if not hasattr(Server, 'sub'):
+            Server.sub		= self.CTX.socket(zmq.SUB)
+            self.sub.bind('tcp://*:{0}'.format(Transceiver.SUB_PORT))
+            self.sub.setsockopt(zmq.SUBSCRIBE, self.sender)
+            
+            Server.sub_poller	= zmq.Poller()
+            self.sub_poller.register(self.sub, zmq.POLLIN)
+
+    def destroy(linger=0):
+        self.CTX.destroy(linger)
+
+    def recv(self, timeout=1000):
+        socks		= dict( self.sub_poller.poll(timeout) )
+        if self.sub in socks and socks[self.sub] == zmq.POLLIN:
+            return self.sub.recv()
+        
+    def send(self, path, headers=None, body="", timeout=1000):
+        query			= headers.get('QUERY', None)
+        all_headers		= {
+            'PATH':		path,
+            'URI':		"{0}{1}".format(path, ('?{0}'.format(query) if query else '')),
+            'METHOD':		'GET',
+            'REMOTE_ADDR':	self.sip,
+        }
+        all_headers.update(headers or {})
+        req			= Request(self.sender, self.conn_id, path=path, headers=all_headers, body=body)
+        msg			= req.encode()
+        
+        socks			= dict( self.push_poller.poll(timeout) )
+        if self.push in socks and socks[self.push] == zmq.POLLOUT:
+            self.push.send(msg)
+        else:
+            raise Exception("Failed trying to send message, push socket timed out")
+
+class Connector(object):
+
+    def __init__(self, ip, server):
+        self.ip			= ip
+        self.server		= server
+        self._with		= False
+
+    def __enter__(self):
+        self._with		= True
+        self.CTX		= zmq.Context()
+        
+        self.req		= self.CTX.socket(zmq.REQ)
+        self.req.connect( 'tcp://{0}:{1}'.format(self.ip, Transceiver.REP_PORT))
+        
+        self.poller		= zmq.Poller()
+        self.poller.register(self.req, zmq.POLLIN)
+        
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self._with		= False
+        self.CTX.destroy(linger=0)
+
+    def _check_with(self):
+        if not self._with:
+            raise Exception("Connector() must be run using the 'with' statement")
+        
+    def recv(self, timeout=1000):
+        self._check_with()
+        socks			= dict( self.poller.poll(timeout) )
+        if self.req in socks and socks[self.req] == zmq.POLLIN:
+            return self.req.recv()
+        else:
+            raise Exception("Connectorion to {0} timed out.  Did not receive pong reply".format(self.tip))
+
+    def ping(self):
+        self._check_with()
+        self.req.send('PING')
+        resp			= self.recv()
+        return resp.lower() == "pong"
+
+    def setup(self):
+        self._check_with()
+        self.req.send('setup(push=tcp://{0}:{1},sub=tcp://{2}:{3})'.format(*self.server.push_addr+self.server.sub_addr))
+        resp			= self.recv()
+        assert resp.lower() == "connected"
+    
+
+class Client(object):
+
+    def __init__(self, connect, server=None):
+        self.our_server		= False
+        self.server		= server
+        self.connect		= connect
+        self._with		= False
+        
+    def __enter__(self):
+        self._with		= True
+        if self.server is None:
+            self.our_server	= True
+            self.server		= Server()
+            
+        with Connector(self.connect, self.server) as conn:
+            self.conn		= conn
+            self.conn.setup()
+        
+        return self
+    
+    def __exit__(self, type, value, traceback):
+        self._with		= False
+        if self.our_server:
+            self.server.destroy()
+            self.our_server	= False
+
+    def _check_with(self):
+        if not self._with:
+            raise Exception("Client() must be run using the 'with' statement")
+
+    def recv(self, timeout=1000):
+        self._check_with()
+        return self.server.recv(timeout)
+
+    def send(self, *args, **kwargs):
+        self._check_with()
+        self.server.send(*args, **kwargs)
