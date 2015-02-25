@@ -35,13 +35,16 @@ def main(**args):
                 logging.debug("Request headers: %s", headers)
                 if method == "json":
                     logging.debug("JSON body: %s", req.body)
+                    
                 elif method == "websocket":
                     logging.debug("Message: %s", req.body)
-                    conn.reply_websocket(req, "Making friends, after school!  Behind the bus, I'm breakin fools...")
+                    Transceiver.respond_websocket(req, "Making friends, after school!  Behind the bus, I'm breakin fools...")
+                    
                 elif method in ['get','post','put','delete']:
                     # this is where the node.py forward will be.  For now reply...
                     logging.info("[ temp ] Sending templorary reply")
-                    conn.reply_http(req, "Forwarding to node...(psych)")
+                    Transceiver.respond_http(req, "Forwarding to node...(psych)")
+                    
                 else:
                     logging.debug("Unrecognized method: %s\n%s", method, req.body)
             else:

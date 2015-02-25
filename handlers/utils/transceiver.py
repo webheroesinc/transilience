@@ -36,7 +36,7 @@ from mongrel2.handler	import Connection
 import os, sys, signal, time
 import uuid, logging, traceback
 import zmq
-import urlparse
+import urlparse, re
 
 timer			= time.time
 
@@ -46,16 +46,17 @@ class Transceiver(object):
     OP_CLOSE		= 0x8
     OP_PING		= 0x9
     OP_PONG		= 0xA
-    PULL_PORT		= 9999
-    PUB_PORT		= 9998
+    PUSH_PORT		= 9999
+    SUB_PORT		= 9998
     REP_PORT		= 9997
 
     def __init__(self, pull_ip, pub_ip):
-        self.pull_addr		= "tcp://{0}:{1}".format(pull_ip, self.PULL_PORT)
-        self.pub_addr		= "tcp://{0}:{1}".format(pub_ip,  self.PUB_PORT)
+        self.pull_addr		= "tcp://{0}:{1}".format(pull_ip, self.PUSH_PORT)
+        self.pub_addr		= "tcp://{0}:{1}".format(pub_ip,  self.SUB_PORT)
         self.done		= False
         self.poller		= zmq.Poller()
         self.connections	= []
+        self.sender_map		= {}
         
         self.sessions_active	= {}
         self.sessions_ponged	= {}
@@ -74,6 +75,10 @@ class Transceiver(object):
         logging.debug("Registering SIGTERM interrupt")
         signal.signal( signal.SIGTERM, self.stop )
 
+    # control methods
+    def stop(self, *args):
+        self.done		= True
+
     def add_connection(self, pull_addr, pub_addr):
         logging.debug("Setting up connection object on pull:{0} and pub:{1}".format(pull_addr, pub_addr))
         conn		= Connection( sender_id=str(uuid.uuid1()),
@@ -84,18 +89,64 @@ class Transceiver(object):
         self.poller.register(conn.reqs, zmq.POLLIN)
         return conn
 
-    def stop(self, *args):
-        self.done		= True
+    def add_sender(self, sender_id, conn):
+        if sender_id not in self.sender_map:
+            logging.debug("Adding sender ID to sender_map: %s", sender_id)
+            self.sender_map[sender_id] = conn
+        return self.sender_map
 
+    def get_sender_conn(self, sender_id):
+        return self.sender_map.get(sender_id)
+
+    def send_pings(self):
+        now			= timer()
+        self.sessions_active	= self.sessions_ponged
+        self.sessions_ponged	= {}
+        self.session_timeout	= now + self.ping_timeout
+        
+        logging.debug("Reset session_timeout to: %s", self.session_timeout)
+        for sid,req in self.sessions_active.items():
+            logging.debug("Sending PING to session ID: %s", sid)
+            self.respond_websocket(req, "", self.OP_PING)
+
+    # handler methods
+    def parse_req_message(self, msg):
+        cmd,args		= re.search('(.*)\((.*)\)', msg).groups()
+        parsed_args		= dict( map(lambda x: tuple(x.split('=')), args.split(',')) )
+        return cmd,parsed_args
+    
     def handle_rep_request(self, msg):
         logging.debug("Received msg on REP socket: %s", msg)
-        if msg.lower() == 'connect':
-            logging.debug("Accepting REP connection")
-            self.rep.send('ACCEPT')
+        if msg.lower() == 'ping':
+            logging.debug("Sending pong to out rep socket")
+            self.rep.send('PONG')
         else:
-            logging.debug("Denying REP connection")
-            self.rep.send('DENIED')
+            cmd,args		= self.parse_req_message(msg)
+            if cmd == 'setup':
+                self.add_connection(pull_addr=args['push'], pub_addr=args['sub'])
+                self.rep.send('connected')
+            else:
+                self.rep.send('unknown command: {0}'.format(cmd.keys()))
 
+    def handle_opcode(self, opcode, req):
+        sid			= (req.sender,req.conn_id)
+        
+        logging.info("Processing opcode: %s", hex(opcode))
+        if opcode	== self.OP_PONG:
+            self.sessions_ponged[sid]	= req
+            
+        elif opcode	== self.OP_PING:
+            self.respond_websocket(req, req.body, self.OP_PONG)
+            
+        elif opcode	== self.OP_CLOSE:
+            self.sessions_active.pop( sid, None )
+            self.sessions_ponged.pop( sid, None )
+            self.respond_websocket(req, "", self.OP_CLOSE)
+            
+        elif opcode	== self.OP_BINARY:
+            pass
+
+    # poller method
     def poll(self, timeout=50):
         now			= timer()
         if now >= self.session_timeout:
@@ -109,48 +160,20 @@ class Transceiver(object):
         
         for conn in self.connections:
             if conn.reqs in socks and socks[conn.reqs] == zmq.POLLIN:
-                return conn
-        return None
+                req			= conn.recv()
+                self.add_sender(req.sender, conn)
+                return conn, req
+        return None, None
 
-    def send_pings(self):
-        now			= timer()
-        self.sessions_active	= self.sessions_ponged
-        self.sessions_ponged	= {}
-        self.session_timeout	= now + self.ping_timeout
-        
-        logging.debug("Reset session_timeout to: %s", self.session_timeout)
-        for sid,req in self.sessions_active.items():
-            logging.debug("Sending PING to session ID: %s", sid)
-            self.conn.reply_websocket(req, "", self.OP_PING)
-
-    def handle_opcode(self, opcode, req):
-        sid			= (req.sender,req.conn_id)
-        
-        logging.info("Processing opcode: %s", hex(opcode))
-        if opcode	== self.OP_PONG:
-            self.sessions_ponged[sid]	= req
-            
-        elif opcode	== self.OP_PING:
-            self.conn.reply_websocket(req, req.body, self.OP_PONG)
-            
-        elif opcode	== self.OP_CLOSE:
-            self.sessions_active.pop( sid, None )
-            self.sessions_ponged.pop( sid, None )
-            self.conn.reply_websocket(req, "", self.OP_CLOSE)
-            
-        elif opcode	== self.OP_BINARY:
-            pass
-    
+    # recv loop
     def recv(self):
-        
         logging.debug("Entering infinite while")
         while not self.done:
             try:
-                conn		= self.poll()
+                conn,req	= self.poll()
                 now		= timer()
 
-                if conn:
-                    req		= conn.recv()
+                if req:
                     sid		= (req.sender,req.conn_id)
                     logging.debug("Processing request from: %s", sid)
                     headers	= req.headers
@@ -169,16 +192,11 @@ class Transceiver(object):
                     if method == "websocket_handshake":
                         self.sessions_active[sid]	= req
                         self.sessions_ponged[sid]	= req
-                        self.conn.reply(req,
-                                        '\r\n'.join([
-                                            "HTTP/1.1 101 Switching Protocols",
-                                            "Upgrade: websocket",
-                                            "Connection: Upgrade",
-                                            "Sec-WebSocket-Accept: %s\r\n\r\n"]) % req.body)
+                        self.reply_websocket_accept(req)
                     elif path.endswith('ping'):
                         text	= query.get('text')
                         logging.debug("Sending pong with body: %s", text)
-                        self.conn.reply_http(req, text)
+                        self.respond_http(req, text)
                         logging.info("Sent pong to %s", headers.get('REMOTE_ADDR'))
                         continue
                     else:
@@ -197,4 +215,25 @@ class Transceiver(object):
                 logging.debug("[ stacktrace ] %s", traceback.format_exc())
         
         logging.debug("Exited infinite loop")
-                    
+
+        
+    # responding methods
+    def respond_http(self, req, *args, **kwargs):
+        self.respond('_http', req, *args, **kwargs)
+
+    def respond_websocket(self, req, *args, **kwargs):
+        self.respond('_websocket', req, *args, **kwargs)
+        
+    def respond(self, response_type, req, *args, **kwargs):
+        conn			= self.get_sender_conn(req.sender)
+        if conn is not None:
+            getattr(conn, "reply"+response_type)(req, *args, **kwargs)
+        else:
+            raise Exception("Could not respond to request with sender ID: %s", req.sender)
+
+    def reply_websocket_accept(self, req):
+        self.respond('', req, '\r\n'.join([
+            "HTTP/1.1 101 Switching Protocols",
+            "Upgrade: websocket",
+            "Connection: Upgrade",
+            "Sec-WebSocket-Accept: %s\r\n\r\n"]) % req.body)
