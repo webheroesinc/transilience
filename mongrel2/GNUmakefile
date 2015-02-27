@@ -33,8 +33,7 @@ start-%:		config.sqlite
 	rm -f $(mg2_s)	2> /dev/null	|| true
 	docker run -d --name mg2 -p 80:80		\
 		-v $$(pwd)/..:/host			\
-		-v $$(pwd):/mg2				\
-		-w /mg2					\
+		-w /host/mongrel2			\
 		webheroes/mongrel2			\
 		./start.sh $*		> $(mg2_d)
 	docker inspect --format '{{ .NetworkSettings.IPAddress }}' mg2 > $(mg2_ip)

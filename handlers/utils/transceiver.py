@@ -32,6 +32,7 @@ Usage:
  ...         # handle request...
 """
 
+from mongrel2		import tnetstrings
 from mongrel2.handler	import Connection
 from mongrel2.request	import Request
 from .			import discovery
@@ -43,6 +44,85 @@ import urlparse, re
 
 timer			= time.time
 
+class Response(object):
+
+    def __init__(self, sender, conn_ids, body):
+        self.sender	= sender
+        self.conn_ids	= conn_ids
+        self.body	= body
+
+    @staticmethod
+    def parse( resp ):
+        """Decode the given msg as a Mongrel2 handler "client" protocol, returning the sender_id (this
+        should be our sender_id), an iterable of connection ids (connections to which this message is
+        destined), and the message payload.  This is a message format such as would be produced by
+        mongrel2.handler Connection.send().
+        
+        """
+        s_id, c_ids_tns, msg        = resp.split( ' ', 2 )
+        c_ids, _                    = tnetstrings.parse( c_ids_tns )
+        assert not _ and type( c_ids ) is str, "Invalid Mongrel2 Handler connection ids: %r" % c_ids
+        return Response(s_id, c_ids.split( ' ' ), msg)
+    
+class WebSocket_response(object):
+
+    def __init__(self, data, opcode=1, rsvd=0):
+        self.data		= data
+        self.opcode		= opcode
+        self.rsvd		= rsvd
+    
+    @staticmethod
+    def parse(msg):
+        """Parse the given 'req' as a WebSockets protocol message.  This is the expected message protocol
+        for all incoming messages on a WebSocket, after initial negotiation is completed.  Returns
+        fin,rsvd,opcode,msglen,msg.  If the request is not valid (doesn't have the correct WebSocket
+        protocol headers), will raise an Exception.  This is a message format such as would be
+        produced by mongrel2.handler websocket_response().
+
+        See http://tools.ietf.org/html/rfc6455#page-28 for a description of the WebSockets Base
+        Framing Protocol encoding.
+
+        """
+        _flg,msg                    = ord( msg[0] ),msg[1:]
+        fin,rsvd,opcode             = _flg >> 7 & 0x01, _flg >> 4 & 0x07, _flg & 0x0f
+        msglen,msg                  = ord( msg[0] ),msg[1:]
+        msk,msglen                  = msglen >> 7 & 0x01, msglen & 0x7f
+        if msglen >= 126:
+            # 16-bit or 64-bit length
+            _shift                  = 16 if msglen == 126 else 64
+            msglen                  = 0
+            while _shift > 0:
+                _shift             -= 8
+                msglen             += ord( msg[0] ) << _shift
+                msg                 = msg[1:]
+        msk,msg                     = (msg[:4],msg[4:]) if msk else ('',msg)
+        return Websocket_response(msg,opcode,rsvd)
+
+    def encode():
+        header=''
+        header+=chr(0x80|self.opcode|self.rsvd<<4)
+        realLength=len(self.data)
+        #print 'realLength',realLength
+        if realLength < 126:
+            dummyLength=realLength
+        elif realLength < 2**16:
+            dummyLength = 126
+        else:
+            dummyLength=127
+            header+=chr(dummyLength)
+        if dummyLength == 127:
+            header += chr(realLength >> 56 &0xff)
+            header += chr(realLength >> 48 &0xff)
+            header += chr(realLength >> 40 &0xff)
+            header += chr(realLength >> 32 &0xff)
+            header += chr(realLength >> 24 & 0xff)
+            header += chr(realLength >> 16 & 0xff)
+        if dummyLength == 126 or dummyLength == 127:
+            header += chr(realLength >> 8 & 0xff)
+            header += chr(realLength & 0xff)
+        return header+self.data
+        
+    
 class Transceiver(object):
     OP_TEXT		= 0x1
     OP_BINARY		= 0x2
@@ -52,13 +132,24 @@ class Transceiver(object):
     PUSH_PORT		= 9999
     SUB_PORT		= 9998
     REP_PORT		= 9997
+    SOCKET_TYPES	= {
+        zmq.PUB:	'PUB',
+        zmq.SUB:	'SUB',
+        zmq.PUSH:	'PUSH',
+        zmq.PULL:	'PULL',
+        zmq.REQ:	'REQ',
+        zmq.REP:	'REP',
+    }
 
-    def __init__(self, pull_ip, pub_ip):
+    def __init__(self, sender, pull_ip, pub_ip):
+        self.sender		= sender
         self.pull_addr		= "tcp://{0}:{1}".format(pull_ip, self.PUSH_PORT)
         self.pub_addr		= "tcp://{0}:{1}".format(pub_ip,  self.SUB_PORT)
         self._with		= False
         self.done		= False
-        self.connections	= []
+        
+        self.incoming		= []
+        self.outgoing		= []
         self.sender_map		= {}
         
         self.sessions_active	= {}
@@ -76,14 +167,13 @@ class Transceiver(object):
     def __enter__(self):
         self._with		= True
         self.poller		= zmq.Poller()
-        self.conn		= self.add_connection(self.pull_addr, self.pub_addr)
+        self.conn		= self.add_connection(self.sender, self.pull_addr, self.pub_addr)
 
         logging.debug("Setting up REP socket on port %d", self.REP_PORT)
         self.CTX		= zmq.Context()
         self.rep		= self.CTX.socket(zmq.REP)
         self.rep.bind('tcp://*:{0}'.format(self.REP_PORT))
-        self.poller.register(self.rep, zmq.POLLIN)
-
+        self.add_incoming(self.rep)
         return self
 
     def __exit__(self, type, value, traceback):
@@ -94,27 +184,27 @@ class Transceiver(object):
         if hasattr(self, '_with') and not self._with:
             raise Exception("Connector() must be run using the 'with' statement")
 
-    def add_connection(self, pull_addr, pub_addr):
+    def add_incoming(self, socket):
+        self.incoming.append(socket)
+        self.poller.register(socket, zmq.POLLIN)
+
+    def add_outgoing(self, socket):
+        self.outgoing.append(socket)
+        
+    def add_connection(self, sender, pull_addr, pub_addr):
         self._check_with()
         logging.debug("Setting up connection object on pull:{0} and pub:{1}".format(pull_addr, pub_addr))
-        conn		= Connection( sender_id=str(uuid.uuid1()),
+        conn		= Connection( sender_id=sender,
                                       sub_addr=pull_addr,
                                       pub_addr=pub_addr )
-
-        self.connections.append(conn)
-        self.poller.register(conn.reqs, zmq.POLLIN)
+        
+        if sender not in self.sender_map:
+            logging.debug("Adding sender ID to sender_map: %s", sender)
+            self.sender_map[sender]	= conn
+            
+        self.add_incoming(conn.reqs)
+        self.add_outgoing(conn.resp)
         return conn
-
-    def add_sender(self, sender_id, conn):
-        self._check_with()
-        if sender_id not in self.sender_map:
-            logging.debug("Adding sender ID to sender_map: %s", sender_id)
-            self.sender_map[sender_id] = conn
-        return self.sender_map
-
-    def get_sender_conn(self, sender_id):
-        self._check_with()
-        return self.sender_map.get(sender_id)
 
     def send_pings(self):
         self._check_with()
@@ -128,74 +218,38 @@ class Transceiver(object):
             logging.debug("Sending PING to session ID: %s", sid)
             self.respond_websocket(req, "", self.OP_PING)
 
-    # handler methods
-    def parse_req_message(self, msg):
-        self._check_with()
-        cmd,args		= re.search('(.*)\((.*)\)', msg).groups()
-        parsed_args		= dict( map(lambda x: tuple(x.split('=')), args.split(',')) )
-        return cmd,parsed_args
-    
-    def handle_rep_request(self, msg):
-        self._check_with()
-        logging.debug("Received msg on REP socket: %s", msg)
-        if msg.lower() == 'ping':
-            logging.debug("Sending pong to out rep socket")
-            self.rep.send('PONG')
-        else:
-            cmd,args		= self.parse_req_message(msg)
-            if cmd == 'setup':
-                conn		= self.add_connection( pull_addr=args['push'],
-                                                       pub_addr	=args['sub'])
-                self.add_sender(args['sender'], conn)
-                self.rep.send('connected')
-            elif cmd == 'broadcast':
-                conn		= self.get_sender_conn(args['sender'])
-                if conn:
-                    conn.resp.send('{0} {1}'.format(args['sender'], args['ping']))
-                    self.rep.send('pinged')
-                else:
-                    self.rep.send('no sender')
-            else:
-                self.rep.send('Unknown command: {0}'.format(cmd))
-
-    def handle_opcode(self, opcode, req):
-        self._check_with()
-        sid			= (req.sender,req.conn_id)
-        
-        logging.info("Processing opcode: %s", hex(opcode))
-        if opcode	== self.OP_PONG:
-            self.sessions_ponged[sid]	= req
-            
-        elif opcode	== self.OP_PING:
-            self.respond_websocket(req, req.body, self.OP_PONG)
-            
-        elif opcode	== self.OP_CLOSE:
-            self.sessions_active.pop( sid, None )
-            self.sessions_ponged.pop( sid, None )
-            self.respond_websocket(req, "", self.OP_CLOSE)
-            
-        elif opcode	== self.OP_BINARY:
-            pass
-
     # poller method
     def poll(self, timeout=50):
         self._check_with()
         now			= timer()
+        reply			= 'RECEIVED'
+        conn,req		= (None, None)
+        
         if now >= self.session_timeout:
             self.send_pings()
             
         socks			= dict(self.poller.poll(timeout))
-                
-        if self.rep in socks and socks[self.rep] == zmq.POLLIN:
-            msg			= self.rep.recv()
-            self.handle_rep_request(msg)
-        
-        for conn in self.connections:
-            if conn.reqs in socks and socks[conn.reqs] == zmq.POLLIN:
-                req			= conn.recv()
-                self.add_sender(req.sender, conn)
-                return conn, req
-        return None, None
+        for sock in self.incoming:
+            if sock in socks:
+                try:
+                    msg		= sock.recv()
+                    logging.debug("Received message: %-40.40s   (socket_type: %s)",
+                                  msg[:37]+'...' if len(msg) >= 40 else msg,
+                                  self.SOCKET_TYPES.get(sock.socket_type, sock.socket_type))
+                    
+                    if msg.lower() == 'ping':
+                        logging.debug("REP socket sending PONG")
+                        reply	= 'PONG'
+                    else:
+                        req	= Request.parse(msg)
+                        conn	= self.sender_map.get(req.sender)
+                except Exception as e:
+                    logging.debug("Error: %s", e)
+                finally:
+                    if sock.socket_type == zmq.REP:
+                        sock.send(reply)
+
+        return conn,req
 
     # recv loop
     def recv(self):
@@ -205,40 +259,71 @@ class Transceiver(object):
             try:
                 conn,req	= self.poll()
                 now		= timer()
+                sid		= None
+                reply		= None
+                reply_opcode	= None
 
                 if req:
                     sid		= (req.sender,req.conn_id)
-                    logging.debug("Processing request from: %s", sid)
                     headers	= req.headers
                     path	= req.path
                     body	= req.body
                     method	= headers.get('METHOD', '').lower()
                     query	= dict( urlparse.parse_qsl(headers.get('QUERY', '').encode('ascii')) )
-                    flags	= headers.get('FLAGS')
-                    opcode	= self.OP_TEXT if flags is None else (int(flags, 16) & 0xf)
 
-                    if opcode != self.OP_TEXT:
-                        self.handle_opcode(opcode, req)
-                        continue
+                    logging.debug("Processing request from: %s", sid)
+                    if query:
+                        headers['QUERY_STR']	= headers['QUERY']
+                        headers['QUERY']	= query
+
+                    if headers.get('FLAGS') is not None:
+                        flags	= headers.get('FLAGS')
+                        opcode	= (int(flags, 16) & 0xf)
+                        
+                        logging.info("Processing opcode: %s", hex(opcode))
+                        if opcode	== self.OP_PONG:
+                            self.sessions_ponged[sid]	= req
+                        elif opcode	== self.OP_PING:
+                            reply		= req.body
+                            reply_opcode	= self.OP_PONG
+                        elif opcode	== self.OP_CLOSE:
+                            self.sessions_active.pop( sid, None )
+                            self.sessions_ponged.pop( sid, None )
+                            reply		= ''
+                            reply_opcode	= self.OP_CLOSE
+                        elif opcode	== self.OP_BINARY:
+                            pass
     
-                    logging.debug("Request headers: %s", headers)
-                    if method == "websocket_handshake":
+                    logging.debug("Request headers: %s", {k:headers[k] for k in ['REMOTE_ADDR', 'QUERY', 'PATH', 'VERSION'] if k in headers})
+                    
+                    if path.endswith('__add_connection__'):
+                        self.add_connection( req.sender,
+                                             pull_addr	= query['push'],
+                                             pub_addr	= query['sub'] )
+                    elif path.endswith('__ping__'):
+                        reply		= query.get('text', '')
+                        logging.debug("Responding to ping: %s", reply)
+                        
+                if reply is not None:
+                    if conn is None:
+                        raise Exception("Can't reply through conn None, req.sender: {0}".format(req.sender))
+
+                    logging.debug('Reply through sender: %s', req.sender)
+                    if method == 'mongrel2':
+                        conn.reply(req, reply)
+                    elif method == "websocket_handshake":
                         self.sessions_active[sid]	= req
                         self.sessions_ponged[sid]	= req
-                        self.reply_websocket_accept(req)
-                    elif path.endswith('ping'):
-                        text	= query.get('text')
-                        logging.debug("Sending pong with body: %s", text)
-                        self.respond_http(req, text)
-                        logging.info("Sent pong to %s", headers.get('REMOTE_ADDR'))
-                        continue
+                        conn.reply(req, '\r\n'.join([ "HTTP/1.1 101 Switching Protocols",
+                                                      "Upgrade: websocket",
+                                                      "Connection: Upgrade",
+                                                      "Sec-WebSocket-Accept: %s\r\n\r\n"]) % req.body)
+                    elif method == 'websocket':
+                        conn.reply_websocket(req, reply, reply_opcode)
                     else:
-                        if query:
-                            headers['QUERY_STR']	= headers['QUERY']
-                            headers['QUERY']		= query
-                        yield (sid,req)
-                else:
-                    yield (None, None)
+                        conn.reply_http(req, reply)
+                        
+                yield sid,conn,req
             except zmq.ZMQError as e:
                 if str(e) == "Interrupted system call":
                     pass
@@ -251,39 +336,11 @@ class Transceiver(object):
         
         logging.debug("Exited infinite loop")
 
-        
-    # responding methods
-    def respond_http(self, req, *args, **kwargs):
-        self._check_with()
-        self.respond('_http', req, *args, **kwargs)
-
-    def respond_websocket(self, req, *args, **kwargs):
-        self._check_with()
-        self.respond('_websocket', req, *args, **kwargs)
-        
-    def respond(self, response_type, req, *args, **kwargs):
-        self._check_with()
-        conn			= self.get_sender_conn(req.sender)
-        if conn is not None:
-            getattr(conn, "reply"+response_type)(req, *args, **kwargs)
-        else:
-            raise Exception("Could not respond to request with sender ID: %s", req.sender)
-
-    def reply_websocket_accept(self, req):
-        self._check_with()
-        self.respond('', req, '\r\n'.join([
-            "HTTP/1.1 101 Switching Protocols",
-            "Upgrade: websocket",
-            "Connection: Upgrade",
-            "Sec-WebSocket-Accept: %s\r\n\r\n"]) % req.body)
-
 
 class Server(object):
-    CONN_COUNT		= 0 
 
     def __init__(self, sender=None, connect=None):
-        Server.CONN_COUNT      += 1
-        self.conn_id		= str(Server.CONN_COUNT)
+        self.conn_count		= 0
         self._with		= False
 
         self.sip		= discovery.get_docker_ip()
@@ -324,6 +381,10 @@ class Server(object):
         if not self._with:
             raise Exception("Server() must be run using the 'with' statement")
 
+    def conn_id(self):
+        self.conn_count	       += 1
+        return str(self.conn_count)
+
     def connect(self, ip):
         self.enforce_with()
         if ip in self.connected:
@@ -334,12 +395,12 @@ class Server(object):
                 self.connected[ip]	= conn
                 return True
             
-    def client(self):
+    def client(self, protocol="mongrel2"):
         self.enforce_with()
         for ip in self.unconnected:
             if self.connect(ip):
                 self.unconnected.remove(ip)
-        return Client(self)
+        return Client(self, protocol)
 
     def recv(self, timeout=1000):
         self.enforce_with()
@@ -347,18 +408,8 @@ class Server(object):
         if self.sub in socks and socks[self.sub] == zmq.POLLIN:
             return self.sub.recv()
         
-    def send(self, path, headers=None, body="", timeout=1000):
+    def send(self, msg, timeout=1000):
         self.enforce_with()
-        query			= headers.get('QUERY', None)
-        all_headers		= {
-            'PATH':		path,
-            'URI':		"{0}{1}".format(path, ('?{0}'.format(query) if query else '')),
-            'METHOD':		'GET',
-            'REMOTE_ADDR':	self.sip,
-        }
-        all_headers.update(headers or {})
-        req			= Request(self.sender, self.conn_id, path=path, headers=all_headers, body=body)
-        msg			= req.encode()
         
         socks			= dict( self.push_poller.poll(timeout) )
         if self.push in socks and socks[self.push] == zmq.POLLOUT:
@@ -412,12 +463,16 @@ class Connector(object):
         self.enforce_with()
         if self.server is None:
             raise Exception("Cannot setup without a server: server={0}".format(self.server))
-        
-        self.req.send( 'setup(sender={0},push=tcp://{1}:{2},sub=tcp://{3}:{4})'.format(
-            self.server.sender, *(self.server.push_addr+self.server.sub_addr)
-        ))
+
+        req			= Request( self.server.sender, '-1', '/__add_connection__', {
+            'METHOD': 'MONGREL2',
+            'QUERY': 'push={0}&sub={1}'.format(
+                'tcp://{0}:{1}'.format(*self.server.push_addr),
+                'tcp://{0}:{1}'.format(*self.server.sub_addr))
+        }, '' )
+        self.req.send(req.encode())
         resp			= self.recv()
-        assert resp.lower() == "connected"
+        assert resp.lower() == "received"
 
     def verify_connectivity(self, timeout=1000):
         self.enforce_with()
@@ -425,22 +480,64 @@ class Connector(object):
             raise Exception("Cannot setup without a server: server={0}".format(self.server))
         now			= timer()
         timeout			= now + (timeout/1000)
+        guid			= str(uuid.uuid4())
+        msg			= Request( self.server.sender, '-1', '/__ping__', {
+            'METHOD': 'MONGREL2',
+            'QUERY': 'text={0}'.format(guid),
+        }, '' ).encode()
         while now < timeout:
-            self.req.send('broadcast(sender={0},ping={1})'.format(self.server.sender, 'b5b44d95-2e33-4af9-95fe-1cade9cd86ef'))
-            print self.req.recv()
+            self.req.send(msg)
+            self.req.recv()
             resp		= self.server.recv(timeout=100)
+            print resp
             if resp is not None:
+                assert Response.parse(resp).body == guid
                 return True
             now			= timer()
         raise Exception("Verifying connection {0} timed out".format(self.ip))
 
 class Client(object):
 
-    def __init__(self, server):
+    def __init__(self, server, protocol="mongrel2"):
         self.server		= server
+        self.protocol		= protocol
+        self.conn_id		= self.server.conn_id()
 
     def recv(self, timeout=1000):
-        return self.server.recv(timeout)
+        resp			= self.server.recv(timeout)
+        if resp is not None:
+            if self.protocol == 'mongrel2':
+                resp		= Response.parse(resp)
+            elif self.protocol == 'http':
+                pass
+            elif self.protocol == 'websocket':
+                resp		= WebSocket_response.parse(resp)
+        return resp
 
-    def send(self, *args, **kwargs):
-        self.server.send(*args, **kwargs)
+    def send(self, path, headers=None, body=""):
+        headers			= self.build_headers(path, headers)
+        req			= Request(self.server.sender, self.conn_id, path, headers, body)
+        self.server.send(req.encode())
+                 
+    def build_headers(self, path, headers):
+        base_headers		= {}
+        if self.protocol == 'http':
+            query		= headers.get('QUERY', None)
+            base_headers.update({
+                'PATH':		path,
+                'URI':		"{0}{1}".format(path, ('?{0}'.format(query) if query else '')),
+                'METHOD':	'GET',
+                'REMOTE_ADDR':	self.sip,
+            })
+        elif self.protocol == 'websocket':
+            base_headers.update({
+                'METHOD':	'WEBSOCKET',
+            })
+        elif self.protocol == 'mongrel2':
+            base_headers.update({
+                'METHOD':	'MONGREL2',
+            })
+            
+        base_headers.update(headers or {})
+        return base_headers
+            

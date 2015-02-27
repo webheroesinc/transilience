@@ -10,7 +10,7 @@ import zmq
 
 def test_api_running():
     mg2_ip		= get_docker_ip('mg2')
-    url			= 'http://{0}/api/ping?text=b5b44d95-2e33-4af9-95fe-1cade9cd86ef'.format(mg2_ip)
+    url			= 'http://{0}/api/__ping__?text=b5b44d95-2e33-4af9-95fe-1cade9cd86ef'.format(mg2_ip)
     req			= requests.get(url, timeout=4)
     assert req.text == "b5b44d95-2e33-4af9-95fe-1cade9cd86ef"
 
@@ -23,7 +23,7 @@ def test_api_new_server_connection():
     api_ip		= get_docker_ip('api')
     with Server(sender="test_api_handler", connect=[api_ip]) as server:
         client		= server.client()
-        client.send('/api/ping', headers={'QUERY':'text=b5b44d95-2e33-4af9-95fe-1cade9cd86ef'})
+        client.send('/api/__ping__', headers={'QUERY':'text=b5b44d95-2e33-4af9-95fe-1cade9cd86ef'})
         
         resp		= client.recv()
-        assert resp.startswith(client.server.sender)
+        assert resp.sender == client.server.sender
