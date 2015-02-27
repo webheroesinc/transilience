@@ -11,7 +11,7 @@ import zmq
 def test_api_running():
     mg2_ip		= get_docker_ip('mg2')
     url			= 'http://{0}/api/__ping__?text=b5b44d95-2e33-4af9-95fe-1cade9cd86ef'.format(mg2_ip)
-    req			= requests.get(url, timeout=4)
+    req			= requests.get(url, timeout=1)
     assert req.text == "b5b44d95-2e33-4af9-95fe-1cade9cd86ef"
 
 def test_api_req_sock_connect():

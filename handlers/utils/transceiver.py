@@ -37,9 +37,10 @@ from mongrel2.handler	import Connection
 from mongrel2.request	import Request
 from .			import discovery
 
+import logging
 import os, sys, signal, time
-import uuid, logging, traceback
-import zmq, uuid
+import uuid, traceback
+import zmq, uuid, json
 import urlparse, re
 
 timer			= time.time
@@ -102,7 +103,6 @@ class WebSocket_response(object):
         header=''
         header+=chr(0x80|self.opcode|self.rsvd<<4)
         realLength=len(self.data)
-        #print 'realLength',realLength
         if realLength < 126:
             dummyLength=realLength
         elif realLength < 2**16:
@@ -121,7 +121,7 @@ class WebSocket_response(object):
             header += chr(realLength >> 8 & 0xff)
             header += chr(realLength & 0xff)
         return header+self.data
-        
+
     
 class Transceiver(object):
     OP_TEXT		= 0x1
@@ -141,23 +141,27 @@ class Transceiver(object):
         zmq.REP:	'REP',
     }
 
-    def __init__(self, sender, pull_ip, pub_ip):
+    def __init__(self, sender, pull_addr, pub_addr, ping_timeout=30, log_level=logging.ERROR):
+        self.log		= logging.getLogger('transceiver')
         self.sender		= sender
-        self.pull_addr		= "tcp://{0}:{1}".format(pull_ip, self.PUSH_PORT)
-        self.pub_addr		= "tcp://{0}:{1}".format(pub_ip,  self.SUB_PORT)
+        self.pull_addr		= pull_addr
+        self.pub_addr		= pub_addr
         self._with		= False
         self.done		= False
         
         self.incoming		= []
         self.outgoing		= []
         self.sender_map		= {}
+        self.conn_map		= {}
         
         self.sessions_active	= {}
         self.sessions_ponged	= {}
-        self.ping_timeout	= 30
+        self.ping_timeout	= ping_timeout
         self.session_timeout	= timer() + self.ping_timeout
 
-        logging.debug("Registering SIGTERM interrupt")
+        self.log.setLevel(log_level)
+
+        self.log.debug("Registering SIGTERM interrupt")
         signal.signal( signal.SIGTERM, self.stop )
 
     # control methods
@@ -169,7 +173,7 @@ class Transceiver(object):
         self.poller		= zmq.Poller()
         self.conn		= self.add_connection(self.sender, self.pull_addr, self.pub_addr)
 
-        logging.debug("Setting up REP socket on port %d", self.REP_PORT)
+        self.log.debug("Setting up REP socket on port %d", self.REP_PORT)
         self.CTX		= zmq.Context()
         self.rep		= self.CTX.socket(zmq.REP)
         self.rep.bind('tcp://*:{0}'.format(self.REP_PORT))
@@ -178,6 +182,9 @@ class Transceiver(object):
 
     def __exit__(self, type, value, traceback):
         self._with		= False
+        for sock in self.incoming+self.outgoing:
+            sock.setsockopt(zmq.LINGER, 0)
+            sock.close()
         self.CTX.destroy(linger=0)
 
     def _check_with(self):
@@ -191,16 +198,18 @@ class Transceiver(object):
     def add_outgoing(self, socket):
         self.outgoing.append(socket)
         
-    def add_connection(self, sender, pull_addr, pub_addr):
+    def add_connection(self, sender, push_addr, sub_addr):
         self._check_with()
-        logging.debug("Setting up connection object on pull:{0} and pub:{1}".format(pull_addr, pub_addr))
+        pull_addr		= "tcp://{0}:{1}".format(*push_addr)
+        pub_addr		= "tcp://{0}:{1}".format(*sub_addr)
+        self.log.debug("Setting up connection object on pull:{0} and pub:{1}".format(pull_addr, pub_addr))
         conn		= Connection( sender_id=sender,
                                       sub_addr=pull_addr,
                                       pub_addr=pub_addr )
         
-        if sender not in self.sender_map:
-            logging.debug("Adding sender ID to sender_map: %s", sender)
-            self.sender_map[sender]	= conn
+        self.log.debug("Adding sender ID to sender_map: %s", sender)
+        self.sender_map[sender]	= conn
+        self.conn_map[conn]	= sender
             
         self.add_incoming(conn.reqs)
         self.add_outgoing(conn.resp)
@@ -213,10 +222,14 @@ class Transceiver(object):
         self.sessions_ponged	= {}
         self.session_timeout	= now + self.ping_timeout
         
-        logging.debug("Reset session_timeout to: %s", self.session_timeout)
-        for sid,req in self.sessions_active.items():
-            logging.debug("Sending PING to session ID: %s", sid)
-            self.respond_websocket(req, "", self.OP_PING)
+        self.log.debug("Reset session_timeout to: %s", self.session_timeout)
+        conn_ids		= [req.conn_id for req in self.sessions_active.values()]
+        sender			= self.conn_map[self.conn]
+        if conn_ids:
+            self.log.debug("Sending PING to conn IDs: %s", conn_ids)
+            self.conn.deliver_websocket(sender, conn_ids, "", self.OP_PING)
+        else:
+            self.log.debug("No connections to PING")
 
     # poller method
     def poll(self, timeout=50):
@@ -233,18 +246,18 @@ class Transceiver(object):
             if sock in socks:
                 try:
                     msg		= sock.recv()
-                    logging.debug("Received message: %-40.40s   (socket_type: %s)",
+                    self.log.debug("Received message: %-40.40s   (socket_type: %s)",
                                   msg[:37]+'...' if len(msg) >= 40 else msg,
                                   self.SOCKET_TYPES.get(sock.socket_type, sock.socket_type))
                     
                     if msg.lower() == 'ping':
-                        logging.debug("REP socket sending PONG")
+                        self.log.debug("REP socket sending PONG")
                         reply	= 'PONG'
                     else:
                         req	= Request.parse(msg)
                         conn	= self.sender_map.get(req.sender)
                 except Exception as e:
-                    logging.debug("Error: %s", e)
+                    self.log.debug("Error: %s", e)
                 finally:
                     if sock.socket_type == zmq.REP:
                         sock.send(reply)
@@ -254,7 +267,7 @@ class Transceiver(object):
     # recv loop
     def recv(self):
         self._check_with()
-        logging.debug("Entering infinite while")
+        self.log.debug("Entering infinite while")
         while not self.done:
             try:
                 conn,req	= self.poll()
@@ -263,7 +276,8 @@ class Transceiver(object):
                 reply		= None
                 reply_opcode	= None
 
-                if req:
+                if req is not None:
+                    req_handled	= False
                     sid		= (req.sender,req.conn_id)
                     headers	= req.headers
                     path	= req.path
@@ -271,7 +285,7 @@ class Transceiver(object):
                     method	= headers.get('METHOD', '').lower()
                     query	= dict( urlparse.parse_qsl(headers.get('QUERY', '').encode('ascii')) )
 
-                    logging.debug("Processing request from: %s", sid)
+                    self.log.debug("Processing request from: %s", sid)
                     if query:
                         headers['QUERY_STR']	= headers['QUERY']
                         headers['QUERY']	= query
@@ -280,35 +294,43 @@ class Transceiver(object):
                         flags	= headers.get('FLAGS')
                         opcode	= (int(flags, 16) & 0xf)
                         
-                        logging.info("Processing opcode: %s", hex(opcode))
+                        self.log.info("Processing opcode: %s", hex(opcode))
                         if opcode	== self.OP_PONG:
                             self.sessions_ponged[sid]	= req
+                            req_handled		= True
                         elif opcode	== self.OP_PING:
                             reply		= req.body
                             reply_opcode	= self.OP_PONG
                         elif opcode	== self.OP_CLOSE:
                             self.sessions_active.pop( sid, None )
                             self.sessions_ponged.pop( sid, None )
-                            reply		= ''
-                            reply_opcode	= self.OP_CLOSE
+                            # reply		= ''
+                            # reply_opcode	= self.OP_CLOSE
                         elif opcode	== self.OP_BINARY:
                             pass
     
-                    logging.debug("Request headers: %s", {k:headers[k] for k in ['REMOTE_ADDR', 'QUERY', 'PATH', 'VERSION'] if k in headers})
+                    self.log.debug("Request headers: %s", {k:headers[k] for k in ['METHOD','REMOTE_ADDR','QUERY','PATH','VERSION','FLAGS'] if k in headers})
                     
                     if path.endswith('__add_connection__'):
-                        self.add_connection( req.sender,
-                                             pull_addr	= query['push'],
-                                             pub_addr	= query['sub'] )
+                        self.log.debug("Adding connection with data: %s", req.data)
+                        conn			= self.add_connection( req.sender,
+                                                                       push_addr=req.data.get('push'),
+                                                                       sub_addr	=req.data.get('sub') )
                     elif path.endswith('__ping__'):
-                        reply		= query.get('text', '')
-                        logging.debug("Responding to ping: %s", reply)
-                        
+                        reply			= query.get('text', '')
+                        self.log.debug("Responding to ping: %s", reply)
+                    elif method == "websocket_handshake":
+                        reply			= True
+
+                    if req_handled or (req.data.get('type') and req.is_disconnect()):
+                        sid,conn,req		= None,None,None
+                    
+                    
                 if reply is not None:
                     if conn is None:
                         raise Exception("Can't reply through conn None, req.sender: {0}".format(req.sender))
 
-                    logging.debug('Reply through sender: %s', req.sender)
+                    self.log.debug('Reply through sender: %s', req.sender)
                     if method == 'mongrel2':
                         conn.reply(req, reply)
                     elif method == "websocket_handshake":
@@ -318,23 +340,34 @@ class Transceiver(object):
                                                       "Upgrade: websocket",
                                                       "Connection: Upgrade",
                                                       "Sec-WebSocket-Accept: %s\r\n\r\n"]) % req.body)
+                        headers['METHOD']	= "WEBSOCKET_CONNECT"
                     elif method == 'websocket':
                         conn.reply_websocket(req, reply, reply_opcode)
                     else:
                         conn.reply_http(req, reply)
-                        
+                        # HTTP can only send one response.
+                        sid,conn,req		= None,None,None
+
                 yield sid,conn,req
             except zmq.ZMQError as e:
                 if str(e) == "Interrupted system call":
                     pass
                 else:
-                    logging.error("[ error ] Infinite loop broke with error: %s", e)
-                    logging.debug("[ stacktrace ] %s", traceback.format_exc())
+                    self.log.error("[ error ] Infinite loop broke with error: %s", e)
+                    self.log.debug("[ stacktrace ] %s", traceback.format_exc())
             except Exception, e:
-                logging.error("[ error ] Infinite loop broke with error: %s", e)
-                logging.debug("[ stacktrace ] %s", traceback.format_exc())
+                self.log.error("[ error ] Infinite loop broke with error: %s", e)
+                self.log.debug("[ stacktrace ] %s", traceback.format_exc())
         
-        logging.debug("Exited infinite loop")
+        self.log.debug("Exited infinite loop")
+        conn_ids		= [req.conn_id for req in self.sessions_active.values()]
+        if conn_ids:
+            sender		= self.conn_map[self.conn]
+            self.log.debug("Closing open websockets: %s", conn_ids)
+            self.conn.deliver_websocket(sender, conn_ids, "", self.OP_CLOSE)
+        else:
+            self.log.debug("No connections to CLOSE")
+        
 
 
 class Server(object):
@@ -464,12 +497,13 @@ class Connector(object):
         if self.server is None:
             raise Exception("Cannot setup without a server: server={0}".format(self.server))
 
-        req			= Request( self.server.sender, '-1', '/__add_connection__', {
-            'METHOD': 'MONGREL2',
-            'QUERY': 'push={0}&sub={1}'.format(
-                'tcp://{0}:{1}'.format(*self.server.push_addr),
-                'tcp://{0}:{1}'.format(*self.server.sub_addr))
-        }, '' )
+        req			= Request( self.server.sender, '-1',
+                                           '/__add_connection__',
+                                           { 'METHOD': 'JSON' },
+                                           json.dumps({
+                                               "push": self.server.push_addr,
+                                               "sub": self.server.sub_addr,
+                                           }) )
         self.req.send(req.encode())
         resp			= self.recv()
         assert resp.lower() == "received"
