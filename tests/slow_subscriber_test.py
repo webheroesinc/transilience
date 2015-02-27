@@ -18,11 +18,11 @@ def test_slow_subscriber_breaks():
 
 def test_slow_subscriber_passes():
     mg2_ip	= get_docker_ip('mg2')
-    url		= 'http://{0}/api'.format(mg2_ip)
+    url		= 'http://{0}/api/ping?text=b5b44d95-2e33-4af9-95fe-1cade9cd86ef'.format(mg2_ip)
     for i in range(10):
         try:
             req		= requests.get(url, timeout=1)
-            assert req.text == "I'm so happy that this worked!"
+            assert req.text == "b5b44d95-2e33-4af9-95fe-1cade9cd86ef"
             break
         except AssertionError as e:
             raise

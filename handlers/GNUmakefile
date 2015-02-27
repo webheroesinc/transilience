@@ -10,14 +10,16 @@ all:
 
 api_dlog	= ../var/log/api_docker.log
 api_dpid	= ../var/run/api_handler.pid
+api_ip		= ../var/addr/api.ip
 
 start-api:
 	docker rm api	2> /dev/null	|| true
 	docker run -d --name api			\
 		-v $$(pwd)/..:/host			\
 		-w /host/handlers			\
-		webheroes/mongrel2			\
+		webheroes/handler			\
 		python api_handler.py	> $(api_dpid)
+	docker inspect --format '{{ .NetworkSettings.IPAddress }}' api > $(api_ip)
 	nohup docker logs -f api	> $(api_dlog) 2>&1 &
 	@echo "Logging docker logs to $(api_dlog)"
 
