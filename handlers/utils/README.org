@@ -1,0 +1,39 @@
+
+
+* Dependencies
+
+  These commands rely on the .pypirc file being in your home directory.  They should look like this:
+
+  #+BEGIN_SRC 
+[distutils]
+index-servers =
+    pypi
+    pypi-test
+
+[pypi]
+repository: https://pypi.python.org/pypi
+username: <pypi username>
+password: <pypi password>
+
+[pypi-test]
+repository: https://testpypi.python.org/pypi
+username: <pypi username>
+password: <pypi password>
+  #+END_SRC
+
+* Registering and upload package to PyPi
+
+  : python setup.py register
+  : python setup.py sdist upload
+
+* Registering and upload package to PyPi-test site
+
+  : python setup.py register -r pypi-test
+  : python setup.py sdist upload -r pypi-test
+
+* Updating package
+
+  Make sure you update the package version in setyp.py and then run the upload script again.
+
+  : python setup.py register -r pypi-test
+  : python setup.py sdist upload -r pypi-test
