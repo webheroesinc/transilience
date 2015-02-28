@@ -6,3 +6,6 @@
 *~
 *.pyc
 /mongrel2/*.sqlite
+/mongrel2-transceiver/dist
+/mongrel2-transceiver/build
+/mongrel2-transceiver/*.egg-info

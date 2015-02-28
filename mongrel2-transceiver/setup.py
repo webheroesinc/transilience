@@ -9,7 +9,10 @@ setup(
         "mongrel2_transceiver":		".",
         "mongrel2_transceiver/testing":	"./testing",
     },
-    version                     = "0.1.0",
+    install_requires		= [
+        'netifaces',
+    ],
+    version                     = "0.2.0",
     description                 = "Non-blocking Mongrel2 handler transceiver",
     author                      = "Matthew Brisebois",
     author_email                = "matthew@webheroes.ca",

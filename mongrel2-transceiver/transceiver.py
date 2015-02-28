@@ -25,25 +25,37 @@ utils.transceiver
 
 
 Usage:
- >>> from utils import Transceiver
- >>> api_mau = Transceiver(pull_ip="172.17.0.171", pub_ip="172.17.0.171")
- >>> for req in api_mau.recv():
- ...     if req is not None:
- ...         # handle request...
+ >>> from mongrel2_transceiver	import Transceiver
+ >>> from utils.discovery	import get_docker_ip
+ >>>
+ >>> mg2_ip = get_docker_ip('mg2')
+ >>> with Transceiver( 'rune',
+ ...                   pull_addr	= (mg2_ip, 9999),
+ ...                   pub_addr		= (mg2_ip, 9998) ) as trans:
+ ...     for sid,conn,req in trans.recv():
+ ...         try:
+ ...             if req is not None:
+ ...                 headers	= req.headers
+ ...                 method	= headers.get('METHOD')
+ ...                 query	= headers.get('QUERY', {})
 """
 
 from mongrel2		import tnetstrings
 from mongrel2.handler	import Connection
 from mongrel2.request	import Request
-from .			import discovery
+from mongrel2		import handler
 
 import logging
 import os, sys, signal, time
 import uuid, traceback
 import zmq, uuid, json
 import urlparse, re
+import netifaces
 
 timer			= time.time
+
+__all__			= ["Transceiver","Server","Connector","Client",
+                           "Request","Response","WebSocket_response"]
 
 class Response(object):
 
@@ -182,9 +194,10 @@ class Transceiver(object):
 
     def __exit__(self, type, value, traceback):
         self._with		= False
-        for sock in self.incoming+self.outgoing:
-            sock.setsockopt(zmq.LINGER, 0)
-            sock.close()
+        handler.CTX.destroy(linger=0)
+        # for sock in self.incoming+self.outgoing:
+        #     sock.setsockopt(zmq.LINGER, 0)
+        #     sock.close()
         self.CTX.destroy(linger=0)
 
     def _check_with(self):
@@ -372,13 +385,17 @@ class Transceiver(object):
 
 class Server(object):
 
-    def __init__(self, sender=None, connect=None):
+    def __init__(self, sender=None, connect=None, ip=None, push_port=Transceiver.PUSH_PORT, sub_port=Transceiver.SUB_PORT):
         self.conn_count		= 0
         self._with		= False
 
-        self.sip		= discovery.get_docker_ip()
-        self.push_addr		= (self.sip, Transceiver.PUSH_PORT)
-        self.sub_addr		= (self.sip, Transceiver.SUB_PORT)
+        if ip is None:
+            self.sip		= netifaces.ifaddresses('eth0')[2][0]['addr']
+        else:
+            self.sip		= ip
+
+        self.push_addr		= (self.sip, push_port)
+        self.sub_addr		= (self.sip, sub_port)
 
         self.sender		= str(sender or uuid.uuid4())
         self.unconnected	= connect
@@ -392,13 +409,13 @@ class Server(object):
         self.CTX		= zmq.Context()
         
         self.push		= self.CTX.socket(zmq.PUSH)
-        self.push.bind('tcp://*:{0}'.format(Transceiver.PUSH_PORT))
+        self.push.bind('tcp://*:{0}'.format(self.push_addr[1]))
         
         self.push_poller	= zmq.Poller()
         self.push_poller.register(self.push, zmq.POLLOUT)
 
         self.sub		= self.CTX.socket(zmq.SUB)
-        self.sub.bind('tcp://*:{0}'.format(Transceiver.SUB_PORT))
+        self.sub.bind('tcp://*:{0}'.format(self.sub_addr[1]))
         self.sub.setsockopt(zmq.SUBSCRIBE, self.sender)
             
         self.sub_poller		= zmq.Poller()
@@ -530,6 +547,7 @@ class Connector(object):
             now			= timer()
         raise Exception("Verifying connection {0} timed out".format(self.ip))
 
+    
 class Client(object):
 
     def __init__(self, server, protocol="mongrel2"):

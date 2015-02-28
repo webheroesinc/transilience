@@ -1,22 +1,15 @@
 
-from utils.transceiver	import Transceiver
-from utils		import logging
+from mongrel2_transceiver	import Transceiver
+from utils.discovery		import get_docker_ip
+from utils			import logging
 
-import os, sys, time
 import traceback
 
-timer			= time.time
-    
 def main(**args):
     log.debug("Getting mg2 address")
-    mg2_ip		= None
-    with open("../var/addr/mg2.ip", 'r') as f:
-        mg2_ip		= f.read().rstrip()
+    mg2_ip		= get_docker_ip('mg2')
     log.warn("Using address %s for mg2 connection", mg2_ip)
-
-    api_transceiver	= Transceiver
-
-    with Transceiver('rune', pull_addr=(mg2_ip, 9999), pub_addr=(mg2_ip, 9998), log_level=logging.DEBUG) as trans:
+    with Transceiver('rune', pull_addr=(mg2_ip, 9999), pub_addr=(mg2_ip, 9998)) as trans:
         for sid,conn,req in trans.recv():
             try:
                 if req is not None:

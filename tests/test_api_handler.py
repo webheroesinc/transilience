@@ -3,8 +3,8 @@ import sys, os, time
 import subprocess, signal
 import requests
 
-from utils.discovery	import get_docker_ip
-from utils.transceiver	import Transceiver, Server, Connector
+from utils.discovery		import get_docker_ip
+from mongrel2_transceiver	import *
 
 import zmq
 

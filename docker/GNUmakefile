@@ -9,6 +9,6 @@ all:
 
 
 webheroes/%:	FORCE
-	docker build --no-cache -t $@ $@
+	docker build -t $@ $@
 
 FORCE:
