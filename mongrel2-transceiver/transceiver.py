@@ -9,7 +9,7 @@ utils.transceiver
     |   |                        ,                                                      ,
     | S |                        ,                                                      ,                                 .--------,
     | V |o - - - - - ,           , PUB (conn)                                           , PUB (conn)                     {          }
-    | R | PUSH       ,   ,-------o-------API------------, PUB (bind)      SUB (conn) ---o-----Node-------------,         |'--------'|
+    | R | PUSH       ,   ,-------o------API-------------, PUB (bind)      SUB (conn) ---o-----Node-------------,         |'--------'|
     |   | (bind)     - > o-,     '-------< + .send(msg) o - - - - - - - - - - > o-,     '-------< + .send(msg) |         |          |
     '---'            PULL' | transceiver   |            |                       | | transceiver   |            | - - - - |    DB    |
                     (conn) '-------------> + .recv()    o - - - - - - - - - - > o-'-------------> + .recv()    |         |          |

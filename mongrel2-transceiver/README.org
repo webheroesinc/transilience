@@ -1,39 +1,46 @@
+#+TITLE: Mongrel2 Transceiver
+
+* Overview
 
 
-* Dependencies
+  #+BEGIN_EXAMPLE
+    ,---,
+    |   |
+    | M | SUB (bind)
+    | G |o < - - - - - - - - - - , < - - - - - - - - - - - - - - - - - - - - - - - - - -,
+    | 2 |                        ,                                                      ,
+    |   |                        ,                                                      ,
+    | S |                        ,                                                      ,                                 .--------,
+    | V |o - - - - - ,           , PUB (conn)                                           , PUB (conn)                     {          }
+    | R | PUSH       ,   ,-------o------API-------------, PUB (bind)      SUB (conn) ---o-----Node-------------,         |'--------'|
+    |   | (bind)     - > o-,     '-------< + .send(msg) o - - - - - - - - - - > o-,     '-------< + .send(msg) |         |          |
+    '---'            PULL' | transceiver   |            |                       | | transceiver   |            | - - - - |    DB    |
+                    (conn) '-------------> + .recv()    o - - - - - - - - - - > o-'-------------> + .recv()    |         |          |
+                         '-----o------------------------' PUSH (bind)      PULL '-----o------------------------'         '-________-'
+                               ^ REP (bind)                                (conn)       REP (bind)
+                               '_ _ _ _ _ _ _ _ _ _ _
+                                                     v REQ (conn)
+                                         ,-----------o----------,
+                                         |                      |
+                                         o        tests         o
+                                    PUSH |                      | SUB
+                                   (bind)'----------------------' (conn)
+  #+END_EXAMPLE
 
-  These commands rely on the .pypirc file being in your home directory.  They should look like this:
+* Transceiver
 
-  #+BEGIN_SRC 
-[distutils]
-index-servers =
-    pypi
-    pypi-test
+  #+BEGIN_SRC python
+from mongrel2_transceiver	import Transceiver
+from utils.discovery	import get_docker_ip
 
-[pypi]
-repository: https://pypi.python.org/pypi
-username: <pypi username>
-password: <pypi password>
-
-[pypi-test]
-repository: https://testpypi.python.org/pypi
-username: <pypi username>
-password: <pypi password>
+mg2_ip = get_docker_ip('mg2')
+with Transceiver( 'rune',
+                  pull_addr	= (mg2_ip, 9999),
+                  pub_addr		= (mg2_ip, 9998) ) as trans:
+    for sid,conn,req in trans.recv():
+        try:
+            if req is not None:
+                headers	= req.headers
+                method	= headers.get('METHOD')
+                query	= headers.get('QUERY', {})
   #+END_SRC
-
-* Registering and upload package to PyPi
-
-  : python setup.py register
-  : python setup.py sdist upload
-
-* Registering and upload package to PyPi-test site
-
-  : python setup.py register -r pypi-test
-  : python setup.py sdist upload -r pypi-test
-
-* Updating package
-
-  Make sure you update the package version in setyp.py and then run the upload script again.
-
-  : python setup.py register -r pypi-test
-  : python setup.py sdist upload -r pypi-test
