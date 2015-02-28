@@ -78,8 +78,7 @@ vm-server-setup:	server-setup
 	@sudo -u $(USERNAME) bash -c "						\
             cat $(USERHOME)/.ssh/id_*sa.pub > $(USERHOME)/.ssh/authorized_keys	\
          && chmod 0600 $(USERHOME)/.ssh/authorized_keys				\
-         && mkdir -p ~/src && cd ~/src						\
-         && ln -s /vagrant 							\
+         && mkdir -p ~/src							\
         "
 	@echo "Run 'make $(USERHOME)/.gitconfig' to set up git config"
 
