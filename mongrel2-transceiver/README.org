@@ -1,9 +1,33 @@
 #+TITLE: Mongrel2 Transceiver
+#+STYLE: <link rel="stylesheet" type="text/css" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.2/css/bootstrap.min.css" />
+#+STYLE: <link rel="stylesheet" type="text/css" href="https://cdn.webheroes.ca/org/org.css" />
+
+#+HTML: <div class="container">
 
 * Overview
 
+  *Mongrel2 Transceiver* was built to solve 3 major hassles that come with trying to handle /ZMQ/ and
+  /WebSockets/.
 
-  #+BEGIN_EXAMPLE
+  1. Handling WebSockets properly
+  2. Dynamically adding more connections to a running handlers
+  3. Reliably destroying ZMQ Contexts
+
+  Transceiver solves all these issues with an intuitive and simplistic syntax.
+
+  *WARNING:* Mongrel2 Transceiver was primarily designed to work with /Docker/ containers.
+  Therefore the default options for all the classes are not expecting to have issues binding to the
+  default ports.  It is your job to configure custom ports if you will be running in a single
+  network environment.  Every class has options for overriding the default ports and have been
+  tested in a single network environment.
+
+** Installation
+
+   : pip install mongrel2-transceiver
+
+** Diagram
+
+   #+BEGIN_EXAMPLE
     ,---,
     |   |
     | M | SUB (bind)
@@ -13,9 +37,9 @@
     | S |                        ,                                                      ,                                 .--------,
     | V |o - - - - - ,           , PUB (conn)                                           , PUB (conn)                     {          }
     | R | PUSH       ,   ,-------o------API-------------, PUB (bind)      SUB (conn) ---o-----Node-------------,         |'--------'|
-    |   | (bind)     - > o-,     '-------< + .send(msg) o - - - - - - - - - - > o-,     '-------< + .send(msg) |         |          |
-    '---'            PULL' | transceiver   |            |                       | | transceiver   |            | - - - - |    DB    |
-                    (conn) '-------------> + .recv()    o - - - - - - - - - - > o-'-------------> + .recv()    |         |          |
+    |   | (bind)     - > o-,     '-------< + .send(msg) o - - - - - - - - - - > o-,     '-------< + .send(msg) | < - - - |          |
+    '---'            PULL' | transceiver   |            |                       | | transceiver   |            |         |    DB    |
+                    (conn) '-------------> + .recv()    o - - - - - - - - - - > o-'-------------> + .recv()    | - - - > |          |
                          '-----o------------------------' PUSH (bind)      PULL '-----o------------------------'         '-________-'
                                ^ REP (bind)                                (conn)       REP (bind)
                                '_ _ _ _ _ _ _ _ _ _ _
@@ -25,22 +49,96 @@
                                          o        tests         o
                                     PUSH |                      | SUB
                                    (bind)'----------------------' (conn)
-  #+END_EXAMPLE
+
+   #+END_EXAMPLE
 
 * Transceiver
 
-  #+BEGIN_SRC python
-from mongrel2_transceiver	import Transceiver
-from utils.discovery	import get_docker_ip
+  The Transceiver class is for Mongrel2 handlers.  The main features of the Transceiver class are:
 
-mg2_ip = get_docker_ip('mg2')
-with Transceiver( 'rune',
+  1. Automatically cleans up ZMQ context on ~__exit__~
+  2. Automatically handles WebSocket connections by:
+     - Accepting WebSocket handshakes
+     - Sending a ping opcode to all active connections every 30 seconds
+     - Removing connections that send a close opcode or fail to send a pong opcode
+  3. Sets up a REP (bind) socket which is used internally by the Connector class
+  4. Easily adds new connections to it's incoming poller
+
+** Usage
+
+   The only required options for the Transceiver to work is the Mongrel2 server's sender ID, Push
+   Address and Sub Address (respectively given as ~pull_addr~ and ~pub_addr~ tuples).
+
+   #+CAPTION: Optional Arguments
+   | Arg            | Value                                     | Default       | Description                                                     |
+   |----------------+-------------------------------------------+---------------+-----------------------------------------------------------------|
+   | ~ping_timeout~ | # in seconds                              | 30            | How often should the poller wake up to send out WebSocket pings |
+   | ~log_level~    | one of the standard python logging levels | logging.ERROR | Sets the log level of the Transceiver logger                    |
+
+
+   #+BEGIN_SRC python
+from mongrel2_transceiver	import Transceiver
+
+mg2_ip		= "<mongrel2 IP>"
+with Transceiver( sender	= 'rune',
                   pull_addr	= (mg2_ip, 9999),
-                  pub_addr		= (mg2_ip, 9998) ) as trans:
+                  pub_addr	= (mg2_ip, 9998) ) as trans:
     for sid,conn,req in trans.recv():
         try:
             if req is not None:
                 headers	= req.headers
                 method	= headers.get('METHOD')
                 query	= headers.get('QUERY', {})
-  #+END_SRC
+   #+END_SRC
+
+
+* Server, Connector & Client
+
+  The Server class is built to work with the Transceiver class.  It's main features are:
+
+  1. When entering the ~with~ statement it will create a PUSH and SUB socket
+  2. At the first call to the ~client~ method it will:
+     1. Use the Connector class to set up connections on each handler IP
+     2. Verify that the connection is working (to avoid slow subscriber issue)
+     3. Returns the Client class
+
+  By the time you receive the Client class you can be *absolutely* certain that the connection is
+  valid and working.
+
+** Usage
+
+   The only required options for the Server to work are to be given a sender ID (should be unique)
+   and a list of handler IPs to connect to.
+
+   #+CAPTION: Optional Arguments
+   | Arg         | Value      |                          Default | Description                    |
+   |-------------+------------+----------------------------------+--------------------------------|
+   | ~ip~        | IP address | first address for eth0 interface | Address to reach /this/ Server |
+   | ~push_port~ | Port #     |                             9999 | Push socket port number        |
+   | ~sub_port~  | Port #     |                             9998 | Sub socket port number         |
+
+   #+BEGIN_SRC python
+from mongrel2_transceiver	import Server
+
+handler_ip	= "<handler IP>"
+with Server( sender	= "python_server",
+             connect	= [ handler_ip ] ) as server:
+    client	= server.client()
+    client.send('/')
+    resp	= client.recv()
+   #+END_SRC
+
+** .client(protocol)
+
+   : .client( "mongrel2" | "http" | "websocket" ) defaults to "mongrel2"
+
+   The Client class supports the 3 Mongrel2 protocols: Mongrel2, HTTP or WebSocket.  Mongrel2 is
+   built in a way that the server decodes HTTP and WebSocket but the handler encodes the response.
+   So all three protocols will send a Mongrel2 encoded request but the expected response will be
+   interpreted as Mongrel2, HTTP or WebSocket.
+
+
+#+HTML: </div>
+#+HTML: <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.3/jquery.min.js"></script>
+#+HTML: <script type="text/javascript" src="https://cdn.webheroes.ca/org/org.js"></script>
+

@@ -10,9 +10,9 @@ utils.transceiver
     | S |                        ,                                                      ,                                 .--------,
     | V |o - - - - - ,           , PUB (conn)                                           , PUB (conn)                     {          }
     | R | PUSH       ,   ,-------o------API-------------, PUB (bind)      SUB (conn) ---o-----Node-------------,         |'--------'|
-    |   | (bind)     - > o-,     '-------< + .send(msg) o - - - - - - - - - - > o-,     '-------< + .send(msg) |         |          |
-    '---'            PULL' | transceiver   |            |                       | | transceiver   |            | - - - - |    DB    |
-                    (conn) '-------------> + .recv()    o - - - - - - - - - - > o-'-------------> + .recv()    |         |          |
+    |   | (bind)     - > o-,     '-------< + .send(msg) o - - - - - - - - - - > o-,     '-------< + .send(msg) | < - - - |          |
+    '---'            PULL' | transceiver   |            |                       | | transceiver   |            |         |    DB    |
+                    (conn) '-------------> + .recv()    o - - - - - - - - - - > o-'-------------> + .recv()    | - - - > |          |
                          '-----o------------------------' PUSH (bind)      PULL '-----o------------------------'         '-________-'
                                ^ REP (bind)                                (conn)       REP (bind)
                                '_ _ _ _ _ _ _ _ _ _ _
@@ -195,9 +195,6 @@ class Transceiver(object):
     def __exit__(self, type, value, traceback):
         self._with		= False
         handler.CTX.destroy(linger=0)
-        # for sock in self.incoming+self.outgoing:
-        #     sock.setsockopt(zmq.LINGER, 0)
-        #     sock.close()
         self.CTX.destroy(linger=0)
 
     def _check_with(self):
@@ -401,8 +398,6 @@ class Server(object):
         self.unconnected	= connect
         self.connected		= {}
         self.setup		= {}
-
-        # set up default connections
         
     def __enter__(self):
         self._with		= True

@@ -131,3 +131,8 @@ stop:		stop-containers remove-containers
 
 interactive:
 	docker run -it -v $$(pwd):/host -w /host webheroes/handler bash
+
+mongrel2-transceiver/documentation.zip:		mongrel2-transceiver/README.html
+	cd mongrel2-transceiver;		\
+	cp README.html index.html;		\
+	zip documentation.zip index.html;
