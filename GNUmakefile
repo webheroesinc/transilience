@@ -136,3 +136,7 @@ mongrel2-transceiver/documentation.zip:		mongrel2-transceiver/README.html
 	cd mongrel2-transceiver;		\
 	cp README.html index.html;		\
 	zip documentation.zip index.html;
+
+upload-mongrel2-transceiver:
+	cd mongrel2-transceiver; python setup.py sdist upload
+	cd mongrel2-transceiver; python setup.py sdist upload -r pypi-test
