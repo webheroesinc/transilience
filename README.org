@@ -2,22 +2,24 @@
 
 * Transilience
 
+  Comming soon...
 
-* Mongrel2 Transceiver
-  This is information about managing the ~mongrel2-transceiver~ python package.  Documenation for
-  how to use ~mongrel2-transceiver~ is in the package README.org.
-  
-  *NOTE:* Python package names can *only* contain alphanumeric characters and dashes.  The
-  registration command will accept names that do not match, but ~pip~ cannot install them.
-  
-  *NOTE:* Package import names can *only* contain alphanumeric characters and underscores.
-
-** Dependencies
-   These commands rely on the .pypirc file being in your home directory.
-
-   They should look like this:
-
-   #+BEGIN_SRC 
+** Mongrel2 Transceiver
+   This is information about managing the ~mongrel2-transceiver~ python package.  Documenation for
+   how to use ~mongrel2-transceiver~ is in the package README.org
+   (/mongrel2-transceiver/README.org).
+   
+   *NOTE:* Python package names can *only* contain alphanumeric characters and dashes.  The
+   registration command will accept names that do not match, but ~pip~ cannot install them.
+   
+   *NOTE:* Package import names can *only* contain alphanumeric characters and underscores.
+ 
+*** Dependencies
+    These commands rely on the .pypirc file being in your home directory.
+ 
+    They should look like this:
+ 
+    #+BEGIN_SRC 
 [distutils]
 index-servers =
     pypi
@@ -32,24 +34,21 @@ password: <pypi password>
 repository: https://testpypi.python.org/pypi
 username: <pypi username>
 password: <pypi password>
-   #+END_SRC
-
-** Registering and upload package to PyPi
+    #+END_SRC
  
-   : python setup.py register
-   : python setup.py sdist upload
- 
-** Registering and upload package to PyPi-test site
- 
-   : python setup.py register -r pypi-test
-   : python setup.py sdist upload -r pypi-test
- 
-** Updating package
- 
-   Make sure you update the package version in setyp.py and then run the upload script again.
- 
-   : python setup.py register -r pypi-test
-   : python setup.py sdist upload -r pypi-test
-   
+*** Registering and upload package to PyPi
   
+    : python setup.py register
+    : python setup.py sdist upload
   
+*** Registering and upload package to PyPi-test site
+  
+    : python setup.py register -r pypi-test
+    : python setup.py sdist upload -r pypi-test
+  
+*** Updating package
+  
+    Make sure you update the package version in setyp.py and then run the upload script again.
+  
+    : python setup.py register -r pypi-test
+    : python setup.py sdist upload -r pypi-test
