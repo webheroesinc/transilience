@@ -45,7 +45,7 @@ from mongrel2.handler	import Connection
 from mongrel2.request	import Request
 
 import logging
-import os, sys, signal, time
+import os, sys, time
 import uuid, traceback
 import zmq, uuid, json
 import urlparse, re
@@ -158,7 +158,6 @@ class Transceiver(object):
         self.pull_addr		= pull_addr
         self.pub_addr		= pub_addr
         self._with		= False
-        self.done		= False
         
         self.incoming		= []
         self.outgoing		= []
@@ -171,13 +170,6 @@ class Transceiver(object):
         self.session_timeout	= timer() + self.ping_timeout
 
         self.log.setLevel(log_level)
-
-        self.log.debug("Registering SIGTERM interrupt")
-        signal.signal( signal.SIGTERM, self.stop )
-
-    # control methods
-    def stop(self, *args):
-        self.done		= True
 
     def __enter__(self):
         self._with		= True
@@ -279,7 +271,7 @@ class Transceiver(object):
     def recv(self):
         self._check_with()
         self.log.debug("Entering infinite while")
-        while not self.done:
+        while True:
             try:
                 conn,req	= self.poll()
                 now		= timer()
