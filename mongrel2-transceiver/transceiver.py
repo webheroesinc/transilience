@@ -185,6 +185,17 @@ class Transceiver(object):
 
     def __exit__(self, type, value, traceback):
         self._with		= False
+        
+        self.log.debug("Exiting with statement")
+        conn_ids		= [req.conn_id for req in self.sessions_active.values()]
+        if conn_ids:
+            sender		= self.conn_map[self.conn]
+            self.log.debug("Closing open websockets: %s", conn_ids)
+            self.conn.deliver_websocket(sender, conn_ids, "", self.OP_CLOSE)
+        else:
+            self.log.debug("No connections to CLOSE")
+            
+        self.log.debug("Closing incoming and outgoing conn sockets & destorying Transceiver ZMQ context")
         for sock in self.incoming+self.outgoing:
             sock.setsockopt(zmq.LINGER, 0)
             sock.close()
@@ -235,7 +246,7 @@ class Transceiver(object):
             self.log.debug("No connections to PING")
 
     # poller method
-    def poll(self, timeout=50):
+    def poll(self):
         self._check_with()
         now			= timer()
         reply			= 'RECEIVED'
@@ -244,7 +255,9 @@ class Transceiver(object):
         if now >= self.session_timeout:
             self.send_pings()
             
-        socks			= dict(self.poller.poll(timeout))
+        remaining		= max(self.session_timeout - now, 0)		# seconds
+        self.log.debug("ZMQ Poller timeout set to: %s seconds", remaining)
+        socks			= dict(self.poller.poll(remaining*1000))	# milliseconds
         for sock in self.incoming:
             if sock in socks:
                 try:
@@ -265,6 +278,7 @@ class Transceiver(object):
                     if sock.socket_type == zmq.REP:
                         sock.send(reply)
 
+        self.log.debug("[ returning ] %-46.46s ( %s, %s )", "conn,req", conn, req)
         return conn,req
 
     # recv loop
@@ -354,22 +368,13 @@ class Transceiver(object):
                 yield sid,conn,req
             except zmq.ZMQError as e:
                 if str(e) == "Interrupted system call":
-                    pass
+                    yield (None,None,None)
                 else:
                     self.log.error("[ error ] Infinite loop broke with error: %s", e)
                     self.log.debug("[ stacktrace ] %s", traceback.format_exc())
             except Exception, e:
                 self.log.error("[ error ] Infinite loop broke with error: %s", e)
                 self.log.debug("[ stacktrace ] %s", traceback.format_exc())
-        
-        self.log.debug("Exited infinite loop")
-        conn_ids		= [req.conn_id for req in self.sessions_active.values()]
-        if conn_ids:
-            sender		= self.conn_map[self.conn]
-            self.log.debug("Closing open websockets: %s", conn_ids)
-            self.conn.deliver_websocket(sender, conn_ids, "", self.OP_CLOSE)
-        else:
-            self.log.debug("No connections to CLOSE")
         
 
 
@@ -581,3 +586,4 @@ class Client(object):
         base_headers.update(headers or {})
         return base_headers
             
+

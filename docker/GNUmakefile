@@ -7,8 +7,15 @@ all:
 	@echo "	 build-%		-- Will build the docker container at the location given in the %"
 	@echo ""
 
+FORCE:
 
-webheroes/%:	FORCE
+mg2_transceiver		= webheroes/handler/mongrel2-transceiver
+
+$(mg2_transceiver):	../mongrel2-transceiver/
+	rsync -va $< $@
+
+webheroes/handler:	$(mg2_transceiver)
 	docker build -t $@ $@
 
-FORCE:
+# webheroes/%:		FORCE
+# 	docker build -t $@ $@

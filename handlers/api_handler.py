@@ -9,6 +9,7 @@ shutdown		= False
 
 def term_signalled(*args):
     global shutdown
+    log.debug("[ shutdown ] Shutdown has been signalled")
     shutdown		= True
 
 def main(**args):
@@ -42,6 +43,7 @@ def main(**args):
                     pass
 
                 if shutdown:
+                    log.debug("Exiting trans.recv() loop...")
                     break
             except Exception, e:
                 log.error("[ error ] Handling request broke with error: %s", e)

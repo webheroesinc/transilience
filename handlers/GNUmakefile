@@ -8,12 +8,18 @@ all:
 	@echo "	 stop-%		-- Stop the Mongrel2 server that is named %"
 	@echo ""
 
+FORCE:
+
 api_dlog	= ../var/log/api_docker.log
 api_dpid	= ../var/run/api_handler.pid
 api_ip		= ../var/addr/api.ip
 
-start-api:
-	docker rm api	2> /dev/null	|| true
+build-%:		FORCE
+	make -C ../docker webheroes/$*	> /dev/null
+
+start-api:		build-handler
+	docker kill	api	|| true
+	docker rm	api	|| true
 	docker run -d --name api			\
 		-v $$(pwd)/..:/host			\
 		-w /host/handlers			\
