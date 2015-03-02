@@ -43,7 +43,6 @@ Usage:
 from mongrel2		import tnetstrings
 from mongrel2.handler	import Connection
 from mongrel2.request	import Request
-from mongrel2		import handler
 
 import logging
 import os, sys, signal, time
@@ -194,7 +193,9 @@ class Transceiver(object):
 
     def __exit__(self, type, value, traceback):
         self._with		= False
-        handler.CTX.destroy(linger=0)
+        for sock in self.incoming+self.outgoing:
+            sock.setsockopt(zmq.LINGER, 0)
+            sock.close()
         self.CTX.destroy(linger=0)
 
     def _check_with(self):
