@@ -15,7 +15,7 @@ api_dpid	= ../var/run/api_handler.pid
 api_ip		= ../var/addr/api.ip
 
 build-%:		FORCE
-	make -C ../docker webheroes/$*	> /dev/null
+	make -C ../docker webheroes/$*
 
 start-api:		build-handler
 	docker kill	api	|| true

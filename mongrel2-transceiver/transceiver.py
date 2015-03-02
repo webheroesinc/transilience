@@ -154,6 +154,7 @@ class Transceiver(object):
 
     def __init__(self, sender, pull_addr, pub_addr, ping_timeout=30, log_level=logging.ERROR):
         self.log		= logging.getLogger('transceiver')
+        self.log.setLevel(log_level)
         self.sender		= sender
         self.pull_addr		= pull_addr
         self.pub_addr		= pub_addr
@@ -168,8 +169,6 @@ class Transceiver(object):
         self.sessions_ponged	= {}
         self.ping_timeout	= ping_timeout
         self.session_timeout	= timer() + self.ping_timeout
-
-        self.log.setLevel(log_level)
 
     def __enter__(self):
         self._with		= True
@@ -208,12 +207,22 @@ class Transceiver(object):
     def add_incoming(self, socket):
         self.incoming.append(socket)
         self.poller.register(socket, zmq.POLLIN)
+    def remove_incoming(self, socket):
+        self.incoming.pop(self.incoming.index(socket))
+        self.poller.unregister(socket)
 
     def add_outgoing(self, socket):
         self.outgoing.append(socket)
+    def remove_outgoing(self, socket):
+        self.outgoing.pop(self.outgoing.index(socket))
         
     def add_connection(self, sender, push_addr, sub_addr):
         self._check_with()
+
+        if sender in self.sender_map:
+            conn		= self.sender_map[sender]
+            raise Exception("Sender ID ({0}) already in use by connection Connection(pull_addr={1},pub_addr={2})".format(sender, conn.sub_addr, conn.pub_addr))
+        
         pull_addr		= "tcp://{0}:{1}".format(*push_addr)
         pub_addr		= "tcp://{0}:{1}".format(*sub_addr)
         self.log.debug("Setting up connection object on pull:{0} and pub:{1}".format(pull_addr, pub_addr))
@@ -222,12 +231,29 @@ class Transceiver(object):
                                       pub_addr=pub_addr )
         
         self.log.debug("Adding sender ID to sender_map: %s", sender)
-        self.sender_map[sender]	= conn
-        self.conn_map[conn]	= sender
+        self.sender_map[sender]		= conn
+        self.conn_map[conn]		= sender
+            
             
         self.add_incoming(conn.reqs)
         self.add_outgoing(conn.resp)
         return conn
+
+    def remove_connection(self, sender):
+        self._check_with()
+        
+        if sender not in self.sender_map:
+            raise Exception("There is no Connection for sender ID {0}".format(sender))
+        
+        conn				= self.sender_map.pop(sender)
+        self.conn_map.pop(conn)
+        
+        self.remove_incoming(conn.reqs)
+        self.remove_outgoing(conn.resp)
+
+        for sock in [conn.reqs, conn.resp]:
+            sock.setsockopt(zmq.LINGER, 0)
+            sock.close()
 
     def send_pings(self):
         self._check_with()
@@ -249,7 +275,6 @@ class Transceiver(object):
     def poll(self):
         self._check_with()
         now			= timer()
-        reply			= 'RECEIVED'
         conn,req		= (None, None)
         
         if now >= self.session_timeout:
@@ -260,6 +285,7 @@ class Transceiver(object):
         socks			= dict(self.poller.poll(remaining*1000))	# milliseconds
         for sock in self.incoming:
             if sock in socks:
+                reply		= 'RECEIVED'
                 try:
                     msg		= sock.recv()
                     self.log.debug("Received message: %-40.40s   (socket_type: %s)",
@@ -331,11 +357,17 @@ class Transceiver(object):
                     if path.endswith('__add_connection__'):
                         self.log.debug("Adding connection with data: %s", req.data)
                         conn			= self.add_connection( req.sender,
-                                                                       push_addr=req.data.get('push'),
-                                                                       sub_addr	=req.data.get('sub') )
+                                                                       push_addr= req.data.get('push'),
+                                                                       sub_addr	= req.data.get('sub') )
+                    elif path.endswith('__remove_connection__'):
+                        self.log.debug("Removing connection with sender ID: %s", req.sender)
+                        self.remove_connection( req.sender )
                     elif path.endswith('__ping__'):
                         reply			= query.get('text', '')
                         self.log.debug("Responding to ping: %s", reply)
+                    elif path.endswith('__disconnect_ping__'):
+                        reply			= "disconnect_ping"
+                        self.log.debug("Responding to disconnect ping: %s", reply)
                     elif method == "websocket_handshake":
                         reply			= True
 
@@ -344,9 +376,9 @@ class Transceiver(object):
                     
                     
                 if reply is not None:
-                    if conn is None:
+                    if conn is None and reply != "disconnect_ping":
                         raise Exception("Can't reply through conn None, req.sender: {0}".format(req.sender))
-
+                    
                     self.log.debug('Reply through sender: %s', req.sender)
                     if method == 'mongrel2':
                         conn.reply(req, reply)
@@ -380,7 +412,9 @@ class Transceiver(object):
 
 class Server(object):
 
-    def __init__(self, sender=None, connect=None, ip=None, push_port=Transceiver.PUSH_PORT, sub_port=Transceiver.SUB_PORT):
+    def __init__(self, sender=None, connect=None, ip=None, push_port=Transceiver.PUSH_PORT, sub_port=Transceiver.SUB_PORT, log_level=logging.ERROR):
+        self.log		= logging.getLogger('server')
+        self.log.setLevel(log_level)
         self.conn_count		= 0
         self._with		= False
 
@@ -393,9 +427,8 @@ class Server(object):
         self.sub_addr		= (self.sip, sub_port)
 
         self.sender		= str(sender or uuid.uuid4())
-        self.unconnected	= connect
+        self.unconnected	= dict.fromkeys(connect)
         self.connected		= {}
-        self.setup		= {}
         
     def __enter__(self):
         self._with		= True
@@ -417,8 +450,15 @@ class Server(object):
         return self
     
     def __exit__(self, type, value, traceback):
-        self._with		= False
+        for ip in self.connected.copy():
+            try:
+                if self.disconnect(ip):
+                    self.log.debug("Successfully unconnected to IP %s, removing from unconnected", ip)
+            except Exception as e:
+                self.log.warn("Error in disconnect: %s", e)
+        
         self.CTX.destroy(linger=0)
+        self._with		= False
 
     def enforce_with(self):
         if not self._with:
@@ -428,26 +468,51 @@ class Server(object):
         self.conn_count	       += 1
         return str(self.conn_count)
 
-    def connect(self, ip):
+    def connect(self, ip, log_level=None):
         self.enforce_with()
+        log_level		= self.log.getEffectiveLevel() if log_level is None else log_level
+        
         if ip in self.connected:
-            raise Exception("Duplicate connect request: already connected to IP address %s", ip)
-        with Connector(ip, self) as conn:
-            conn.setup()
-            if conn.verify_connectivity(timeout=2000):
-                self.connected[ip]	= conn
+            raise Exception("Duplicate connect request: already connected to IP address {0}".format(ip))
+        
+        self.log.debug('Attempting to connect to IP %s', ip)
+        with Connector(ip, self, log_level=log_level) as conn:
+            conn.connect()
+            if conn.verify_connect(timeout=2000):
+                self.connected[ip] = conn
+                del self.unconnected[ip]
                 return True
             
-    def client(self, protocol="mongrel2"):
+    def disconnect(self, ip, log_level=None):
         self.enforce_with()
-        for ip in self.unconnected:
-            if self.connect(ip):
-                self.unconnected.remove(ip)
-        return Client(self, protocol)
+        log_level		= self.log.getEffectiveLevel() if log_level is None else log_level
+        
+        if ip in self.unconnected:
+            raise Exception("Duplicate disconnect request: already unconnected to IP address {0}".format(ip))
+        
+        self.log.debug('Attempting to unconnect to IP %s', ip)
+        with Connector(ip, self, log_level=log_level) as conn:
+            conn.disconnect()
+            if conn.verify_disconnect(timeout=2000):
+                self.unconnected[ip] = None
+                del self.connected[ip]
+                return True
+            
+    def client(self, protocol="mongrel2", log_level=None):
+        self.enforce_with()
+        log_level		= self.log.getEffectiveLevel() if log_level is None else log_level
+        
+        for ip in self.unconnected.copy():
+            if self.connect(ip, log_level):
+                self.log.debug('Successfully connected to IP %s, removing from unconnected', ip)
+            else:
+                raise Exception("Unable to connect to handler at address {0}".format(ip))
+            
+        return Client(self, protocol, log_level=log_level)
 
     def recv(self, timeout=1000):
         self.enforce_with()
-        socks		= dict( self.sub_poller.poll(timeout) )
+        socks			= dict( self.sub_poller.poll(timeout) )
         if self.sub in socks and socks[self.sub] == zmq.POLLIN:
             return self.sub.recv()
         
@@ -463,10 +528,12 @@ class Server(object):
         
 class Connector(object):
 
-    def __init__(self, ip, server=None):
+    def __init__(self, ip, server=None, log_level=logging.ERROR):
         self.ip			= ip
         self.server		= server
         self._with		= False
+        self.log		= logging.getLogger('connector({0})'.format(self.ip))
+        self.log.setLevel(log_level)
 
     def __enter__(self):
         self._with		= True
@@ -474,9 +541,6 @@ class Connector(object):
         
         self.req		= self.CTX.socket(zmq.REQ)
         self.req.connect( 'tcp://{0}:{1}'.format(self.ip, Transceiver.REP_PORT))
-        
-        self.poller		= zmq.Poller()
-        self.poller.register(self.req, zmq.POLLIN)
         
         return self
 
@@ -490,8 +554,7 @@ class Connector(object):
         
     def recv(self, timeout=1000):
         self.enforce_with()
-        socks			= dict( self.poller.poll(timeout) )
-        if self.req in socks and socks[self.req] == zmq.POLLIN:
+        if self.req.poll(timeout) == zmq.POLLIN:
             return self.req.recv()
         else:
             raise Exception("Connectorion to {0} timed out.  Did not receive pong reply".format(self.ip))
@@ -502,15 +565,13 @@ class Connector(object):
         resp			= self.recv()
         return resp.lower() == "pong"
 
-    def setup(self):
+    def connect(self):
         self.enforce_with()
         if self.server is None:
-            raise Exception("Cannot setup without a server: server={0}".format(self.server))
+            raise Exception("Cannot connect without a server: server={0}".format(self.server))
 
-        req			= Request( self.server.sender, '-1',
-                                           '/__add_connection__',
-                                           { 'METHOD': 'JSON' },
-                                           json.dumps({
+        req			= Request( self.server.sender, '-1', '/__add_connection__',
+                                           { 'METHOD': 'JSON' }, json.dumps({
                                                "push": self.server.push_addr,
                                                "sub": self.server.sub_addr,
                                            }) )
@@ -518,10 +579,33 @@ class Connector(object):
         resp			= self.recv()
         assert resp.lower() == "received"
 
-    def verify_connectivity(self, timeout=1000):
+    def disconnect(self):
         self.enforce_with()
         if self.server is None:
-            raise Exception("Cannot setup without a server: server={0}".format(self.server))
+            raise Exception("Cannot disconnect without a server: server={0}".format(self.server))
+
+        req			= Request( self.server.sender, '-1', '/__remove_connection__', { 'METHOD': 'JSON' }, '{}' )
+        self.req.send(req.encode())
+        resp			= self.recv()
+        assert resp.lower() == "received"
+
+    def verify_disconnect(self, timeout=1000):
+        self.enforce_with()
+        now			= timer()
+        timeout			= now + (timeout/1000)
+        msg			= Request( self.server.sender, '-1', '/__disconnect_ping__', { 'METHOD': 'MONGREL2' }, '' ).encode()
+        while now < timeout:
+            self.req.send(msg)
+            self.req.recv()
+            resp		= self.server.recv(timeout=100)
+            print resp
+            if resp is None:
+                return True
+            now			= timer()
+        raise Exception("Verifying disconnection {0} timed out".format(self.ip))
+
+    def verify_connect(self, timeout=1000):
+        self.enforce_with()
         now			= timer()
         timeout			= now + (timeout/1000)
         guid			= str(uuid.uuid4())
@@ -543,10 +627,12 @@ class Connector(object):
     
 class Client(object):
 
-    def __init__(self, server, protocol="mongrel2"):
+    def __init__(self, server, protocol="mongrel2", log_level=logging.ERROR):
         self.server		= server
         self.protocol		= protocol
         self.conn_id		= self.server.conn_id()
+        self.log		= logging.getLogger('client({0})'.format(self.conn_id))
+        self.log.setLevel(log_level)
 
     def recv(self, timeout=1000):
         resp			= self.server.recv(timeout)
@@ -557,12 +643,16 @@ class Client(object):
                 pass
             elif self.protocol == 'websocket':
                 resp		= WebSocket_response.parse(resp)
+                
+        self.log.debug("Received message: %-100.100s...", resp)
         return resp
 
     def send(self, path, headers=None, body=""):
         headers			= self.build_headers(path, headers)
         req			= Request(self.server.sender, self.conn_id, path, headers, body)
-        self.server.send(req.encode())
+        msg			= req.encode()
+        self.log.debug("Sending message: %-40.40s...", msg)
+        self.server.send(msg)
                  
     def build_headers(self, path, headers):
         base_headers		= {}

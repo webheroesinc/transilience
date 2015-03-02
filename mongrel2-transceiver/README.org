@@ -107,7 +107,7 @@ with Transceiver( sender	= 'rune',
 
 ** Usage
 
-   The only required options for the Server to work are to be given a sender ID (should be unique)
+   The only required options for the Server to work are to be given a sender ID (must be unique)
    and a list of handler IPs to connect to.
 
    #+CAPTION: Optional Arguments

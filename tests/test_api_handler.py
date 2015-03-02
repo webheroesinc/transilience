@@ -5,6 +5,7 @@ import requests
 
 from utils.discovery		import get_docker_ip
 from mongrel2_transceiver	import *
+from utils			import logging
 
 import zmq
 
@@ -16,14 +17,41 @@ def test_api_running():
 
 def test_api_req_sock_connect():
     api_ip		= get_docker_ip('api')
-    with Connector( api_ip ) as conn:
+    with Connector( api_ip, log_level=logging.DEBUG ) as conn:
         assert conn.ping()
 
 def test_api_new_server_connection():
     api_ip		= get_docker_ip('api')
-    with Server(sender="test_api_handler", connect=[api_ip]) as server:
+    with Server(sender="test_api_handler", connect=[api_ip], log_level=logging.DEBUG) as server:
         client		= server.client()
         client.send('/api/__ping__', headers={'QUERY':'text=b5b44d95-2e33-4af9-95fe-1cade9cd86ef'})
         
         resp		= client.recv()
         assert resp.sender == client.server.sender
+
+def test_api_duplicate_sender_ident():
+    api_ip		= get_docker_ip('api')
+    try:
+        with Server(sender="test_api_handler", connect=[api_ip], log_level=logging.DEBUG) as server:
+            client		= server.client()
+            server.connect(api_ip)
+        assert False
+    except Exception as e:
+        if str(e).startswith('Duplicate connect request'):
+            pass
+        else:
+            raise
+
+def test_api_disconnect():
+    api_ip		= get_docker_ip('api')
+    try:
+        with Server(sender="test_api_handler", connect=[api_ip], log_level=logging.DEBUG) as server:
+            client		= server.client()
+            server.disconnect(api_ip)
+            client.send('')
+        assert False
+    except Exception as e:
+        if str(e).startswith('Failed trying to send message'):
+            pass
+        else:
+            raise
