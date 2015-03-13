@@ -231,6 +231,12 @@ class Transceiver(object):
                         headers['QUERY_STR']	= headers['QUERY']
                         headers['QUERY']	= query
 
+                    if req.data.get('type') and req.is_disconnect():
+                        self.log.info("Connection disconnected: %s", sid)
+                        self.log.debug("Request body: %s", body)
+                        self.sessions_active.pop( sid, None )
+                        self.sessions_ponged.pop( sid, None )
+
                     if headers.get('FLAGS') is not None:
                         flags	= headers.get('FLAGS')
                         opcode	= (int(flags, 16) & 0xf)
@@ -243,10 +249,9 @@ class Transceiver(object):
                             reply		= req.body
                             reply_opcode	= self.OP_PONG
                         elif opcode	== self.OP_CLOSE:
+                            self.log.info("Closing connection: %s", sid)
                             self.sessions_active.pop( sid, None )
                             self.sessions_ponged.pop( sid, None )
-                            # reply		= ''
-                            # reply_opcode	= self.OP_CLOSE
                         elif opcode	== self.OP_BINARY:
                             pass
     
@@ -269,7 +274,7 @@ class Transceiver(object):
                     elif method == "websocket_handshake":
                         reply			= True
 
-                    if req_handled or (req.data.get('type') and req.is_disconnect()):
+                    if req_handled:
                         sid,conn,req		= None,None,None
                     
                     
