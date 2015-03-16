@@ -24,7 +24,7 @@ start-api:		build-handler
 		-v $$(pwd)/..:/host			\
 		-w /host/handlers			\
 		webheroes/handler			\
-		python api_handler.py	> $(api_dpid)
+		python api.py		> $(api_dpid)
 	docker inspect --format '{{ .NetworkSettings.IPAddress }}' api > $(api_ip)
 	nohup docker logs -f api	> $(api_dlog) 2>&1 &
 	@echo "Logging docker logs to $(api_dlog)"

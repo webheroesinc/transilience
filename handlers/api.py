@@ -9,15 +9,19 @@ shutdown		= False
 
 def term_signalled(*args):
     global shutdown
-    log.debug("[ shutdown ] Shutdown has been signalled")
     shutdown		= True
 
 def main(**args):
     global shutdown
+
     log.debug("Getting mg2 address")
     mg2_ip		= get_docker_ip('mg2')
-    log.warn("Using address %s for mg2 connection", mg2_ip)
-    with Transceiver('rune', pull_addr=(mg2_ip, 9999), pub_addr=(mg2_ip, 9998), log_level=logging.DEBUG) as trans:
+
+    log.info("Using address %s for mg2 connection", mg2_ip)
+    with Transceiver( 'centaurus',
+                      pull_addr	= (mg2_ip, 9999),
+                      pub_addr	= (mg2_ip, 9998),
+                      log_level	= logging.DEBUG ) as trans:
         
         for sid,conn,req in trans.recv():
             try:
@@ -25,22 +29,26 @@ def main(**args):
                     headers	= req.headers
                     method	= headers.get('METHOD', '').lower()
                     query	= headers.get('QUERY', {})
+                    remote_addr	= headers.get('REMOTE_ADDR')
+                    flags	= headers.get('FLAGS', "0x1")
+                    opcode	= (int(flags, 16) & 0xf)
                     
-                    if method == "websocket":
-                        log.debug("Message: %s", req.body)
-                        conn.reply_websocket(req, "Making friends, after school!  Behind the bus, I'm breakin fools...")
+                    if method.startswith("websocket"):
+                        message		= "[ %-15.15s | %s ] {0}\n" % (str(remote_addr),req.conn_id)
+                        conn_ids	= [r.conn_id for r in trans.sessions_active.values()]
+                        if opcode == trans.OP_CLOSE:
+                            message	= message.format("Left chat")
+                        elif method == "websocket_connect":
+                            message	= message.format("Joined chat")
+                        else:
+                            message	= message.format(req.body)
+                        conn.deliver_websocket(req.sender, conn_ids, message)
                         
                     elif method in ['get','post','put','delete']:
-                        # this is where the node.py forward will be.  For now reply...
-                        log.info("[ temp ] Sending templorary reply")
-                        conn.reply_http(req, "Forwarding to node...(psych)")
+                        conn.reply_http(req, "<h1>HTTP is lame sauce, use WebSockets foo!</h1>")
                         
-                    elif method == "mongrel2":
-                        pass
                     else:
-                        log.debug("Unrecognized method %s: %s", method.upper(), req.path)
-                else:
-                    pass
+                        log.warn("Dropping unrecognized method: %s", method)
 
                 if shutdown:
                     log.debug("Exiting trans.recv() loop...")

@@ -130,7 +130,7 @@ remove-containers:
 stop:		stop-containers remove-containers
 
 interactive:
-	docker run -it -v $$(pwd):/host -w /host webheroes/handler bash
+	docker run -it -v $$(pwd):/host -w /host webheroes/mongrel2 bash
 
 mongrel2-transceiver/documentation.zip:		mongrel2-transceiver/README.html
 	cd mongrel2-transceiver;		\

@@ -15,6 +15,7 @@ FORCE:
 mg2_s		= ../var/run/mongrel2_server.pid
 mg2_d		= ../var/run/mg2.pid
 mg2_ip		= ../var/addr/mg2.ip
+mg2_dlog	= ../var/log/mg2.log
 
 mongrel2.conf:
 	@printf "Create and configure a mongrel2.conf\n\
@@ -37,8 +38,10 @@ start-%:		config.sqlite
 		webheroes/mongrel2			\
 		./start.sh $*		> $(mg2_d)
 	docker inspect --format '{{ .NetworkSettings.IPAddress }}' mg2 > $(mg2_ip)
+	nohup docker logs -f api	> $(mg2_dlog) 2>&1 &
+	@echo "Logging docker logs to $(mg2_dlog)"
 
-$(mg2):
+$(mg2_s):
 	@printf "[ error ] Mongrel2 server is not running\n\n" && exit 1
 $(mg2_d):
 	@printf "[ error ] Docker is not running\n\n" && exit 1
@@ -46,8 +49,7 @@ $(mg2_ip):
 	@printf "[ error ] Docker IP file does not exist\n\n" && exit 1
 
 stop-%:			$(mg2_d)			\
-			$(mg2_ip)			\
-			$(mg2_s)
+			$(mg2_ip)
 	docker exec $$(cat $(mg2_d)) m2sh stop -name $*	\
 	&& rm $(mg2_d)					\
 	&& rm $(mg2_ip)
