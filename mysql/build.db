@@ -1,0 +1,10 @@
+/* -*- mode: sql -*- */
+
+DROP DATABASE IF EXISTS `transilience`;
+CREATE DATABASE `transilience`;
+USE `transilience`;
+
+CREATE TABLE `test` (
+       `id`	int(10) PRIMARY KEY AUTO_INCREMENT,
+       `name`	varchar(20) DEFAULT 'Pierce Hawthorne'
+)

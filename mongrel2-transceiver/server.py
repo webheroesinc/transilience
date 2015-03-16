@@ -14,6 +14,11 @@
 # PARTICULAR PURPOSE.  See the GNU General Public License for more details.
 #
 
+__author__                      = "Matthew Brisebois"
+__email__                       = "matthew@webheroes.ca"
+__copyright__                   = "Copyright (c) 2015 Web Heroes Inc."
+__license__                     = "Dual License: GPLv3 (or later) and Commercial (see LICENSE)"
+
 from mongrel2		import tnetstrings
 from mongrel2.request	import Request
 from .transceiver	import Transceiver
@@ -24,11 +29,6 @@ import netifaces
 import logging
 
 timer			= time.time
-
-__author__                      = "Matthew Brisebois"
-__email__                       = "matthew@webheroes.ca"
-__copyright__                   = "Copyright (c) 2015 Web Heroes Inc."
-__license__                     = "Dual License: GPLv3 (or later) and Commercial (see LICENSE)"
 
 __all__			= ["Server","Connector","Client",
                            "Request","Response","WebSocket_response"]
