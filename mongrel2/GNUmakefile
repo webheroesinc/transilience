@@ -21,7 +21,7 @@ mongrel2.conf:
   (example: https://github.com/zedshaw/mongrel2/blob/master/examples/configs/multi_handler.conf)\n" && exit 1
 
 config.sqlite:		mongrel2.conf
-	docker run --name mg2_conf -p 80:80		\
+	docker run --name mg2_conf -p 80:80 --rm	\
 		-v $$(pwd):/mg2				\
 		-w /mg2					\
 		webheroes/mongrel2			\

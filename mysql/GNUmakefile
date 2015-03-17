@@ -17,7 +17,11 @@ mysql_ip	= ../var/addr/mysql.ip
 start-mysql:
 	docker kill	mysql	|| true
 	docker rm	mysql	|| true
-	docker run --name mysql -e MYSQL_ROOT_PASSWORD=tesla -d -v $$(pwd):/mysql mysql	> $(mysql_dpid)
+	docker run --name mysql				\
+		-e MYSQL_ROOT_PASSWORD=tesla		\
+		-v $$(pwd):/mysql			\
+		-v $$(pwd)/databases:/var/lib/mysql	\
+		-d mysql	> $(mysql_dpid)
 	docker inspect --format '{{ .NetworkSettings.IPAddress }}' mysql > $(mysql_ip)
 	nohup docker logs -f mysql	> $(mysql_dlog) 2>&1 &
 	@echo "Logging docker logs to $(mysql_dlog)"
