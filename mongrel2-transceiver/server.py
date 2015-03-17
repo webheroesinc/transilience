@@ -31,7 +31,7 @@ import logging
 timer			= time.time
 
 __all__			= ["Server","Connector","Client",
-                           "Request","Response","WebSocket_response"]
+                           "Request","Response","Websocket_response"]
 
 class Response(object):
 
@@ -53,39 +53,40 @@ class Response(object):
         assert not _ and type( c_ids ) is str, "Invalid Mongrel2 Handler connection ids: %r" % c_ids
         return Response(s_id, c_ids.split( ' ' ), msg)
     
-class WebSocket_response(object):
+class Websocket_response(object):
 
-    def __init__(self, data, opcode=1, rsvd=0):
+    def __init__(self, data, opcode=1, rsvd=0,msg=None):
         self.data		= data
         self.opcode		= opcode
         self.rsvd		= rsvd
+        self.msg		= msg
     
     @staticmethod
     def parse(msg):
-        """Parse the given 'req' as a WebSockets protocol message.  This is the expected message protocol
-        for all incoming messages on a WebSocket, after initial negotiation is completed.  Returns
-        fin,rsvd,opcode,msglen,msg.  If the request is not valid (doesn't have the correct WebSocket
+        """Parse the given 'req' as a Websockets protocol message.  This is the expected message protocol
+        for all incoming messages on a Websocket, after initial negotiation is completed.  Returns
+        fin,rsvd,opcode,msglen,msg.  If the request is not valid (doesn't have the correct Websocket
         protocol headers), will raise an Exception.  This is a message format such as would be
         produced by mongrel2.handler websocket_response().
 
-        See http://tools.ietf.org/html/rfc6455#page-28 for a description of the WebSockets Base
+        See http://tools.ietf.org/html/rfc6455#page-28 for a description of the Websockets Base
         Framing Protocol encoding.
 
         """
-        _flg,msg                    = ord( msg[0] ),msg[1:]
-        fin,rsvd,opcode             = _flg >> 7 & 0x01, _flg >> 4 & 0x07, _flg & 0x0f
-        msglen,msg                  = ord( msg[0] ),msg[1:]
-        msk,msglen                  = msglen >> 7 & 0x01, msglen & 0x7f
-        if msglen >= 126:
-            # 16-bit or 64-bit length
-            _shift                  = 16 if msglen == 126 else 64
-            msglen                  = 0
-            while _shift > 0:
-                _shift             -= 8
-                msglen             += ord( msg[0] ) << _shift
-                msg                 = msg[1:]
-        msk,msg                     = (msg[:4],msg[4:]) if msk else ('',msg)
-        return Websocket_response(msg,opcode,rsvd)
+	_flg,data		= ord( msg[0] ),msg[1:]
+	fin,rsvd,opcode		= _flg >> 7 & 0x01, _flg >> 4 & 0x07, _flg & 0x0f
+	datalen,data		= ord( data[0] ),data[1:]
+	msk,datalen		= datalen >> 7 & 0x01, datalen & 0x7f
+	if datalen >= 126:
+	    # 16-bit or 64-bit length
+	    _shift		= 16 if datalen == 126 else 64
+	    datalen		= 0
+	    while _shift > 0:
+		_shift	       -= 8
+		datalen	       += ord( data[0] ) << _shift
+		data		= data[1:]
+	msk,data		= (data[:4],data[4:]) if msk else ('',data)
+        return Websocket_response(data,opcode,rsvd,msg)
 
     def encode():
         header=''
@@ -339,12 +340,11 @@ class Client(object):
     def recv(self, timeout=1000):
         resp			= self.server.recv(timeout)
         if resp is not None:
-            if self.protocol == 'mongrel2':
-                resp		= Response.parse(resp)
-            elif self.protocol == 'http':
+            resp		= Response.parse(resp)
+            if self.protocol == 'http':
                 pass
             elif self.protocol == 'websocket':
-                resp		= WebSocket_response.parse(resp)
+                resp		= Websocket_response.parse(resp.body)
                 
         self.log.debug("Received message: %-100.100s...", resp)
         return resp

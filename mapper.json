@@ -1,0 +1,27 @@
+{
+    "movie": {
+	".table": "movies",
+	".key": "movie_id",
+	"$movie": {
+	    "movie_id": "id",
+	    "title": true,
+	    "description": true,
+	    "year": true,
+	    "rating": true,
+	    "length": true,
+	    "categories": {
+		".table": "categories",
+		".key": "category_id",
+		".has": {
+		    ".table": "movie_has_category",
+		    "movies":		["movies.movie_id", "movie_has_category.movie_id"],
+		    "categories":	["categories.category_id", "movie_has_category.category_id"]
+		},
+		"$category": {
+		    "name": true,
+		    "description": true
+		}
+	    }
+	}
+    }
+}

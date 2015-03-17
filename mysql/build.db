@@ -4,7 +4,48 @@ DROP DATABASE IF EXISTS `transilience`;
 CREATE DATABASE `transilience`;
 USE `transilience`;
 
-CREATE TABLE `test` (
-       `id`	int(10) PRIMARY KEY AUTO_INCREMENT,
-       `name`	varchar(20) DEFAULT 'Pierce Hawthorne'
-)
+CREATE TABLE `movies` (
+       `movie_id`	int(10) PRIMARY KEY AUTO_INCREMENT,
+       `title`		varchar(255) DEFAULT 'No Title',
+       `description`	MEDIUMTEXT DEFAULT NULL,
+       `year`		year DEFAULT NULL,
+       `rating`		decimal(3,1) DEFAULT NULL,
+       `length`		int(3) DEFAULT NULL
+) ENGINE=INNODB;
+
+CREATE TABLE `categories` (
+       `category_id`	int(10) PRIMARY KEY AUTO_INCREMENT,
+       `name`		varchar(255) DEFAULT NULL,
+       `description`	MEDIUMTEXT DEFAULT NULL
+) ENGINE=INNODB;
+
+CREATE TABLE `movie_has_category` (
+       `movie_id`	int(10),
+       `category_id`	int(10),
+       FOREIGN KEY `mhc_movie_id` (movie_id)
+       	       REFERENCES movies(movie_id)
+	       		  ON UPDATE CASCADE
+	       		  ON DELETE CASCADE,
+       FOREIGN KEY `mhc_category_id` (category_id)
+       	       REFERENCES categories(category_id)
+	       		  ON UPDATE CASCADE
+	       		  ON DELETE CASCADE
+) ENGINE=INNODB;
+
+INSERT INTO movies (`movie_id`, `title`, `description`, `year`, `rating`, `length`)
+     VALUES (100, "Focus", "In the midst of veteran con man Nickys latest scheme, a woman from his past - now an accomplished femme fatale - shows up and throws his plans for a loop.", 2015, 6.8, 105),
+     	    (101, "Kingsman: The Secret Service", "A spy organization recruits an unrefined, but promising street kid into the agencys ultra-competitive training program, just as a global threat emerges from a twisted tech genius.", 2014, 8.2, 129);
+
+INSERT INTO categories (`category_id`, `name`, `description`)
+     VALUES (20000, "Action",		"Movies with action"),
+     	    (20001, "Adventure",	"Movies with adventure"),
+     	    (20002, "Comedy",		"Movies with comedy"),
+     	    (20003, "Crime",		"Movies with crime");
+
+INSERT INTO movie_has_category (`movie_id`, `category_id`)
+     VALUES (100, 20000),
+     	    (100, 20001),
+     	    (101, 20000),
+     	    (101, 20002),
+     	    (101, 20003);
+

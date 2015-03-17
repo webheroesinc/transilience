@@ -14,7 +14,7 @@ mg2_transceiver		= webheroes/handler/mongrel2-transceiver
 $(mg2_transceiver):	../mongrel2-transceiver/
 	rsync -va $< $@
 
-webheroes/handler:	$(mg2_transceiver)
+webheroes/handler:	$(mg2_transceiver) FORCE
 	docker build -t $@ $@
 
 # webheroes/%:		FORCE

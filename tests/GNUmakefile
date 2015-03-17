@@ -13,6 +13,7 @@ FORCE:
 
 mg2_s		= ../var/run/mongrel2_server.pid
 api_d		= ../var/run/api_handler.pid
+node_d		= ../var/run/node_handler.pid
 
 $(mg2_s):
 	make -s -C ../mongrel2 start-main
@@ -20,6 +21,9 @@ $(mg2_s):
 $(api_d):
 	make -s -C ../handlers start-api
 	@touch api.started
+$(node_d):
+	make -s -C ../handlers start-node
+	@touch node.started
 
 stop-mongrel2:
 	make -s -C ../mongrel2 stop-main
@@ -27,6 +31,9 @@ stop-mongrel2:
 stop-api:
 	make -s -C ../handlers stop-api
 	@rm -f api.started
+stop-node:
+	make -s -C ../handlers stop-node
+	@rm -f node.started
 
 
 pre-prep-slow-subscriber:
@@ -48,6 +55,13 @@ run-api-handler:	prep-api-handler $(mg2_s) $(api_d)
 		-w /host/tests/				\
 		webheroes/handler			\
 		py.test -v test_api_handler.py
+
+run-node-handler:	prep-node-handler $(mg2_s) $(api_d) $(node_d)
+	docker run -d --name $@				\
+		-v $$(pwd)/..:/host			\
+		-w /host/tests/				\
+		webheroes/handler			\
+		py.test -v test_node_handler.py
 
 pre-prep-%:
 	@echo "Prepping for test $*..."

@@ -4,6 +4,18 @@
 
   Comming soon...
 
+** JSON mapper
+
+   : /api/movie/{movie_id}
+   : /api/movie/{movie_id}/categories/{category_id}
+   : /api/category/{category_id}
+
+   #+BEGIN_SRC javascript
+   {
+       ""
+   }
+   #+END_SRC
+
 ** Mongrel2 Transceiver
    This is information about managing the ~mongrel2-transceiver~ python package.  Documenation for
    how to use ~mongrel2-transceiver~ is in the package README.org
