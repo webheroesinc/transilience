@@ -1,27 +1,63 @@
 {
     "movie": {
+	".table": "movies:m",
+	".key": "movie_id",
+	".format": "list",
+	
+	".segments": ["$movie:dict"],
+	".where": {
+	    "movie_id": "$movie"
+	},
+	
+	"movie_id": "id",
+	"title": true,
+	"description": true,
+	"year": true,
+	"details": {
+	    "rating": true,
+	    "length": true
+	},
+	"categories": {
+	    ".table": "categories:c",
+	    ".key": "category_id",
+	    ".format": "list",
+	    
+	    ".segments": ["$category:dict"],
+	    ".where": {
+		"category_id": "$category"
+	    },
+	    
+	    ".has": {
+		"movie_has_category:mhc": ["m.movie_id", "mhc.movie_id"]
+	    },
+	    ".join": ["c.category_id", "mhc.category_id"],
+	    "name": true,
+	    "description": true
+	}
+    },
+    "test": {
 	".table": "movies",
 	".key": "movie_id",
-	"$movie": {
-	    "movie_id": "id",
-	    "title": true,
-	    "description": true,
-	    "year": true,
+	".segments": ["$movie", "$year"],
+	".where": {
+	    "movie_id": "$movie",
+	    "year": "$year"
+	},
+	"movie_id": "id",
+	"title": true,
+	"description": true,
+	"year": true,
+	"details": {
 	    "rating": true,
-	    "length": true,
-	    "categories": {
-		".table": "categories",
-		".key": "category_id",
-		".has": {
-		    ".table": "movie_has_category",
-		    "movies":		["movies.movie_id", "movie_has_category.movie_id"],
-		    "categories":	["categories.category_id", "movie_has_category.category_id"]
-		},
-		"$category": {
-		    "name": true,
-		    "description": true
-		}
-	    }
+	    "length": true
+	},
+	"categories": {
+	    ".table": "categories",
+	    ".key": "category_id",
+	    ".format": "list",
+	    ".join": ["categories.movie_id", "movies.movie_id"],
+	    "name": true,
+	    "description": true
 	}
     }
 }
