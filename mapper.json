@@ -2,14 +2,14 @@
     "movie": {
 	".table": "movies:m",
 	".key": "movie_id",
-	".format": "list",
 	
-	".segments": ["$movie:dict"],
+	".segments": ["$movie:single"],
 	".where": {
 	    "movie_id": "$movie"
 	},
 	
-	"movie_id": "id",
+	"movie_id": false,
+	"id": "{movie_id}",
 	"title": true,
 	"description": true,
 	"year": true,
@@ -20,44 +20,29 @@
 	"categories": {
 	    ".table": "categories:c",
 	    ".key": "category_id",
-	    ".format": "list",
-	    
-	    ".segments": ["$category:dict"],
-	    ".where": {
-		"category_id": "$category"
-	    },
-	    
 	    ".has": {
 		"movie_has_category:mhc": ["m.movie_id", "mhc.movie_id"]
 	    },
 	    ".join": ["c.category_id", "mhc.category_id"],
 	    "name": true,
 	    "description": true
-	}
-    },
-    "test": {
-	".table": "movies",
-	".key": "movie_id",
-	".segments": ["$movie", "$year"],
-	".where": {
-	    "movie_id": "$movie",
-	    "year": "$year"
 	},
-	"movie_id": "id",
-	"title": true,
-	"description": true,
-	"year": true,
-	"details": {
-	    "rating": true,
-	    "length": true
-	},
-	"categories": {
-	    ".table": "categories",
-	    ".key": "category_id",
-	    ".format": "list",
-	    ".join": ["categories.movie_id", "movies.movie_id"],
-	    "name": true,
-	    "description": true
+	"actors": {
+	    ".table": "actors:a",
+	    ".key": "actor_id",
+	    ".has": {
+		"movie_has_actor:mha": ["m.movie_id", "mha.movie_id"]
+	    },
+	    ".join": ["a.actor_id", "mha.actor_id"],
+	    "first_name": false,
+	    "last_name": false,
+	    "name": {
+		"first": "{first_name}",
+		"last": "{last_name}",
+		"full": "{first_name} {last_name}",
+		"length": ": \"{first_name} {last_name}\".split('i')"
+	    },
+	    "age": true
 	}
     }
 }

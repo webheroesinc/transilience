@@ -6,7 +6,9 @@ import simplejson	as json
 root		= db_mapper.load('../mapper.json')
 print root
 
-roots		= root('/movie/100')
-print json.dumps(roots, indent=4)
-# print root('/movie/100/categories/20000/name')
+print json.dumps(root('/movie/100'), indent=4)
+print json.dumps(root('/movie/100/actors'), indent=4)
+print json.dumps(root('/movie/100/actors/99001'), indent=4)
+print json.dumps(root('/movie/100/actors/99001/age'), indent=4)
+print root('/movie/100/actors/99001/name/full')
 

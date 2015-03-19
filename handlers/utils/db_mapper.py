@@ -58,7 +58,9 @@ class View(object):
             elif type(v) is dict:
                 clist	= clist + self.columns(v)[0]
             elif type(v) in [str,unicode]:
-                clist.append("`%s`.`%s` as `%s`" % (table, k, v))
+                pass
+            elif v == False:
+                clist.append("`%s`.`%s`" % (table, k))
             else:
                 clist.append("`%s`.`%s`" % (table, k))
 
@@ -68,7 +70,7 @@ class View(object):
             jlist.append("JOIN `%s` %s ON %s = %s" % ((t,a or '')+tuple(v)))
 
         if self._directives.get('join') is not None:
-            jlist.append("JOIN `%s` %s ON %s = %s" % ((self.table,self.alias or '')+tuple(self._directives.get('join'))))
+            jlist.append("LEFT JOIN `%s` %s ON %s = %s" % ((self.table,self.alias or '')+tuple(self._directives.get('join'))))
 
         return clist, jlist
 
@@ -96,18 +98,21 @@ class View(object):
         # Start off with the list of root views
         # If segments: use only that view
         # For all root views: build querys
-        fmt		= self._directives.get('format', 'list')
+        fmt		= "multiple"
+        filters		= []
         if len(segments):
             seg		= segments.pop(0)
             view	= root_view	= self.get(seg)
+            
+            if view is not None:
+                for var,fmt in view.segments():
+                    view.param(var, (len(segments) or None) and segments.pop(0))
+            else:
+                raise Exception("Endpoint does not exist: %s" % (path,))
+            
             while segments:
-                if view is not None:
-                    for var,fmt in view.segments():
-                        view.param(var, (len(segments) or None) and segments.pop(0))
-                else:
-                    raise Exception("Endpoint does not exist: %s" % (path,))
-                if segments:
-                    view	= view.get(segments.pop(0))
+                filters.append(segments.pop(0))
+            print "These are the filters, the filters are we:", filters
             
             curs.execute( root_view.query(), tuple(root_view._params.values()) )
             result		= root_view.group_data(curs.fetchall(), format=fmt)
@@ -115,14 +120,20 @@ class View(object):
             for root,root_view in self._columns.items():
                 curs.execute( root_view.query(), tuple(root_view._params.values()) )
                 roots[root]	= root_view.group_data(curs.fetchall(), format=fmt)
-            
+            result		= roots
+
+        for f in filters:
+            prev_result		= result
+            for k in result.keys():
+                if str(k) == f:
+                    result	= result.get(k)
+            if prev_result == result:
+                print prev_result
+                raise Exception("Endpoint does not exist: %s" % (path,))
         return result
 
     def group_data(self, data, format=None):
-        format			= format if format is not None else self._directives.get('format')
         key			= self._directives.get('key')
-        if type(self._columns.get(key)) in [str,unicode]:
-            key			= self._columns.get(key)
         key_id			= None
         groups			= []
         for row in data:
@@ -134,15 +145,13 @@ class View(object):
             group.append(row)
         groups.append(group)
 
-        rows			= []
+        result			= {}
         for group in groups:
             datum	= self.attach(group[0], self._columns, group)
-            rows.append( datum )
+            result[group[0][key]]	= datum
 
-        if format == "dict":
-            result	= (len(rows) or None) and rows.pop(0)
-        else:
-            result	= rows
+        if format == "single":
+            result	= (len(result) or None) and result.popitem()[1]
 
         return result
 
@@ -154,10 +163,13 @@ class View(object):
             elif type(v) is dict:
                 struct[k]	= self.attach(data,v)
             elif type(v) in [str,unicode]:
-                struct[v]	= data[v]
-                del struct[k]
+                struct[k]	= v.format(**data)
+                if v.startswith(':'):
+                    struct[k]	= eval(struct[k][1:])
             elif type(v) is View:
                 struct[k]	= v.group_data(rows)
+            elif v == False:
+                del struct[k]
             else:
                 struct[k]	= None
         return struct
