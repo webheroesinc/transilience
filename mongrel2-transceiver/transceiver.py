@@ -227,9 +227,8 @@ class Transceiver(object):
                     query	= dict( urlparse.parse_qsl(headers.get('QUERY', '').encode('ascii')) )
 
                     self.log.debug("Processing request from: %s", sid)
-                    if query:
-                        headers['QUERY_STR']	= headers['QUERY']
-                        headers['QUERY']	= query
+                    headers['QUERY_STR']	= headers['QUERY']
+                    headers['QUERY']		= query or {}
 
                     if req.data.get('type') and req.is_disconnect():
                         self.log.info("Connection disconnected: %s", sid)
