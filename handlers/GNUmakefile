@@ -14,10 +14,15 @@ api_dlog	= ../var/log/api_docker.log
 api_dpid	= ../var/run/api_handler.pid
 api_ip		= ../var/addr/api.ip
 
+demo		= ../mongrel2/static/demo.py
+
 build-%:		FORCE
 	make -C ../docker webheroes/$*
 
-start-api:		build-handler
+$(demo):
+	cd ../mongrel2/static/; ln ../../handlers/api.py demo.py
+
+start-api:		build-handler $(demo)
 	docker kill	api	|| true
 	docker rm	api	|| true
 	docker run -d --name api			\

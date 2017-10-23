@@ -9,3 +9,4 @@
 /mongrel2-transceiver/dist
 /mongrel2-transceiver/build
 /mongrel2-transceiver/*.egg-info
+/mongrel2/static/demo.py
